@@ -15,14 +15,17 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 import numpy as np
+import pandas as pd
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from ..config import config
+from ..data.features import build_forecast_features
 from ..dispatch.optimizer import BESSConfig, DispatchOptimizer, DispatchSchedule
+from ..models.demand import LightGBMDemandForecaster, ForecastResult
 from ..models.price import IEXPriceForecaster
 from ..models.solar import SolarForecastResult, estimate_solar_generation
 from ..utils.constants import ChargingStrategy, HT_CONSUMERS
@@ -113,7 +116,7 @@ class PriceForecastResponse(BaseModel):
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @app.get("/health")
-async def health_check():
+def health_check():
     return {
         "status": "healthy",
         "version": "0.1.0",
@@ -123,7 +126,7 @@ async def health_check():
 
 
 @app.get("/consumers")
-async def list_consumers():
+def list_consumers():
     """List available consumers with metadata."""
     return {
         cid: {
@@ -135,10 +138,104 @@ async def list_consumers():
     }
 
 
+# ─── Model Registry ──────────────────────────────────────────────────────────
+# In-memory cache of loaded models. In production, back this with Redis or
+# a model-serving framework like MLflow / BentoML.
+
+_model_registry: Dict[str, LightGBMDemandForecaster] = {}
+
+
+def _get_demand_model(consumer_id: str) -> LightGBMDemandForecaster:
+    """Load a trained demand model for a consumer, with caching."""
+    if consumer_id in _model_registry:
+        return _model_registry[consumer_id]
+
+    model_path = config.model_dir / consumer_id
+    if not (model_path / "lightgbm_demand.joblib").exists():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No trained model found for consumer '{consumer_id}'. "
+                f"Train a model first via the pipeline, then save it to {model_path}."
+            ),
+        )
+
+    model = LightGBMDemandForecaster()
+    model.load(model_path)
+    _model_registry[consumer_id] = model
+    logger.info(f"Loaded demand model for {consumer_id} ({len(model.feature_names)} features)")
+    return model
+
+
+@app.post("/forecast/demand", response_model=DemandForecastResponse)
+def forecast_demand(request: DemandForecastRequest):
+    """
+    Generate demand forecast for an HT consumer.
+
+    Requires a pre-trained LightGBM model saved under
+    ``config.model_dir/<consumer_id>/lightgbm_demand.joblib``.
+
+    The endpoint builds forecast features from the consumer's recent history,
+    runs the model, and returns point predictions with uncertainty bounds.
+    """
+    # Validate consumer exists
+    if request.consumer_id not in HT_CONSUMERS:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown consumer '{request.consumer_id}'. Available: {list(HT_CONSUMERS.keys())}",
+        )
+
+    # Load model (from cache or disk)
+    model = _get_demand_model(request.consumer_id)
+
+    # Build feature DataFrame for the forecast horizon.
+    # In production, this reads recent actuals from the data store.
+    # For now, create a timestamp scaffold and generate temporal features.
+    start = pd.Timestamp.now().floor("h") + pd.Timedelta(hours=1)
+    timestamps = pd.date_range(start, periods=request.horizon_hours, freq="h")
+
+    forecast_df = pd.DataFrame({
+        "timestamp": timestamps,
+        "consumer_id": request.consumer_id,
+        # Placeholder: in production, fill from latest actuals for lag/rolling features.
+        # When lag features are unavailable (no recent history), the model
+        # degrades gracefully — LightGBM treats missing values as NaN natively.
+        "consumption_kwh": np.nan,
+    })
+
+    forecast_df = build_forecast_features(forecast_df, target_col="consumption_kwh")
+
+    # Ensure all expected feature columns exist; fill missing with NaN
+    for col in model.feature_names:
+        if col not in forecast_df.columns:
+            forecast_df[col] = np.nan
+
+    result: ForecastResult = model.predict(forecast_df)
+
+    response = DemandForecastResponse(
+        consumer_id=request.consumer_id,
+        timestamps=[t.isoformat() for t in result.timestamp],
+        point_forecast_kwh=result.point_forecast.tolist(),
+        lower_bound_kwh=result.lower_bound.tolist(),
+        upper_bound_kwh=result.upper_bound.tolist(),
+        model_name=result.model_name,
+        metrics=result.metrics,
+    )
+
+    if request.include_features:
+        response.metrics["n_features"] = len(model.feature_names)
+        response.metrics["top_features"] = {
+            row["feature"]: float(row["importance"])
+            for _, row in model.feature_importance.head(10).iterrows()
+        } if model.feature_importance is not None else {}
+
+    return response
+
+
 @app.post("/forecast/price", response_model=PriceForecastResponse)
-async def forecast_price(
-    month: int = Field(default=4, ge=1, le=12),
-    hours: int = Field(default=24, ge=1, le=168),
+def forecast_price(
+    month: int = Query(default=4, ge=1, le=12),
+    hours: int = Query(default=24, ge=1, le=168),
 ):
     """Forecast IEX DAM prices and landed costs."""
     forecaster = IEXPriceForecaster()
@@ -161,7 +258,7 @@ async def forecast_price(
 
 
 @app.post("/forecast/solar", response_model=SolarForecastResponse)
-async def forecast_solar(request: SolarForecastRequest):
+def forecast_solar(request: SolarForecastRequest):
     """Forecast solar generation for a given location and capacity."""
     timestamps = pd.date_range(
         datetime.now().replace(minute=0, second=0),
@@ -185,7 +282,7 @@ async def forecast_solar(request: SolarForecastRequest):
 
 
 @app.post("/dispatch/optimize", response_model=DispatchResponse)
-async def optimize_dispatch(request: DispatchRequest):
+def optimize_dispatch(request: DispatchRequest):
     """Optimize energy dispatch for a 24-hour window."""
     bess = None
     if request.bess_capacity_kwh and request.bess_capacity_kwh > 0:
@@ -223,10 +320,6 @@ async def optimize_dispatch(request: DispatchRequest):
         bess_savings_inr=schedule.bess_savings_inr,
         reliability_score=schedule.reliability_score,
     )
-
-
-# Need pandas for some endpoints
-import pandas as pd
 
 
 def run():

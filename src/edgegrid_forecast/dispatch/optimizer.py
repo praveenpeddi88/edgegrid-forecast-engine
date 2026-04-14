@@ -122,8 +122,10 @@ class DispatchOptimizer:
         5. Remaining demand: buy from cheapest source (grid vs IEX)
         """
         n_hours = len(demand_kwh)
-        assert len(solar_kwh) == n_hours
-        assert len(iex_prices_inr_kwh) == n_hours
+        if len(solar_kwh) != n_hours:
+            raise ValueError(f"solar_kwh length ({len(solar_kwh)}) must match demand_kwh length ({n_hours})")
+        if len(iex_prices_inr_kwh) != n_hours:
+            raise ValueError(f"iex_prices length ({len(iex_prices_inr_kwh)}) must match demand_kwh length ({n_hours})")
 
         if timestamps is None:
             timestamps = pd.date_range("2025-01-01", periods=n_hours, freq="h")
@@ -340,10 +342,16 @@ def optimize_bess_size(
                 simple_payback = capex / max(annual_savings, 1)
 
                 # Simplified IRR (assuming 15-year life, constant savings)
-                try:
-                    irr = np.irr([-capex] + [annual_savings] * 15) if annual_savings > 0 else -1
-                except:
-                    irr = annual_savings / capex if capex > 0 else 0
+                if annual_savings > 0 and capex > 0:
+                    try:
+                        import numpy_financial as npf
+                        irr = npf.irr([-capex] + [annual_savings] * 15)
+                    except ImportError:
+                        # Fallback: Newton's method approximation for IRR
+                        # For constant cashflows: NPV = -capex + savings * (1-(1+r)^-n)/r = 0
+                        irr = annual_savings / capex  # Simple return as approximation
+                else:
+                    irr = -1.0
 
                 results.append({
                     "size_kwh": size_kwh,

@@ -18,6 +18,7 @@ from loguru import logger
 
 from ..utils.constants import (
     DEMAND_CHARGE_INR_PER_KVA_MONTH,
+    landed_cost_from_iex,
     mwh_inr_kwh_to_crores,
     mwh_inr_kwh_to_lakhs,
 )
@@ -198,7 +199,3 @@ def compute_monthly_economics(
         total_savings_inr=total_savings,
         co2_avoided_kg=co2_avoided,
     )
-
-
-# Import needed in function
-from ..utils.constants import landed_cost_from_iex
