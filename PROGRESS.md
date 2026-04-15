@@ -238,7 +238,7 @@ Priority follows EIL PRD module architecture: M1 → M2 → M3 → M4.
 
 ### Completed ✅
 
-- [x] **M1 Data Quality Engine** — 6 India-specific detectors + 52 tests (Session 6)
+- [x] **M1 Data Quality Engine** — 6 India-specific detectors + 63 tests (Sessions 6-7)
 - [x] **ROADMAP restructured to PRD modules** — M1-M6 alignment (Session 6)
 - [x] **README.md rewrite** — product + engineering documentation (Session 6)
 - [x] **Chronos-Bolt integration** — 8.9% MAPE zero-shot (Session 5)
@@ -267,6 +267,29 @@ Priority follows EIL PRD module architecture: M1 → M2 → M3 → M4.
 ---
 
 ## 10. Session Log
+
+### Session 7 — 2026-04-15
+**Focus:** M1 code review fixes + test coverage hardening
+
+What got done:
+- Ran structured code review (Security A, Performance B-, Correctness B, Maintainability B+)
+- Fixed 5 correctness/safety bugs:
+  - C-1: Operator precedence ambiguity in validate_physical_ranges (explicit parens)
+  - C-2: Wired voltage confirmation into `dg_confidence` column (was dead code)
+  - C-4: calibrate() mutated self.polynomial_degree — fixed with local variable
+  - C-5: detect_gaps crashes on empty series (NaT from min/max) — added early return guard
+  - M-3: Removed unused `field` import
+- Fixed 4 performance issues (all vectorized, removing Python loops):
+  - P-1: detect_frozen_readings — groupby.transform instead of loop over run IDs
+  - P-2: Seasonal imputation — shift(freq=) caused index misalignment, fixed with shift(periods=)
+  - P-3: normalize_for_dr_baseline — vectorized with shift(1) and boolean masking
+  - P-4: detect_outliers_contextual — groupby.transform z-scores instead of loop
+- Added 11 new tests (120 total, all passing):
+  - T-1: Isolation Forest multivariate outlier detection (3 tests)
+  - T-2: Physical range validation with NaN inputs (2 tests)
+  - T-3: Empty/single-row edge cases for detect_gaps, frozen readings, z-score, imputation, pipeline (5 tests)
+  - DG confidence column verification (1 test)
+- Commit `c6bea44` pushed to main
 
 ### Session 6 — 2026-04-15
 **Focus:** PRD alignment + M1 Data Quality Engine (India-specific)
