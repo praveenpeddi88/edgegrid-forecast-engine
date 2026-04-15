@@ -195,7 +195,7 @@
 
 | Hash | Date | Description |
 |------|------|-------------|
-| `(pending)` | 2026-04-15 | feat: Chronos-Bolt foundation model, IEX price collector, CV fix |
+| `c309b98` | 2026-04-15 | feat: Chronos-Bolt foundation model, IEX price collector, CV fix |
 | `122b765` | 2026-04-15 | docs: Add PROGRESS.md project tracker |
 | `d57174d` | 2026-04-15 | feat: 112-feature pipeline with weather/solar/AQ + training infrastructure |
 | `31d08cc` | 2026-04-15 | feat: Add external data collectors and 131K-row training dataset |
