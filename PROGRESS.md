@@ -28,7 +28,8 @@
 | `models/solar.py` | Solar generation forecast model | ✅ Built |
 | `models/price.py` | IEX price model | ✅ Built |
 | `data/collectors/iex_prices.py` | IEX DAM price CSV parser + synthetic generator | ✅ Verified |
-| `training/train_demand.py` | Training pipeline with baseline vs enriched comparison | ✅ Verified |
+| `training/train_demand.py` | Training pipeline with baseline vs enriched comparison (synthetic) | ✅ Verified |
+| `training/train_real_demand.py` | Real meter data training — 6 HT consumers, 4.01% avg MAPE | ✅ Verified |
 | `dispatch/optimizer.py` | BESS dispatch with 3 charging strategies | ✅ Built |
 | `dispatch/economics.py` | Landed cost calculator, savings estimation | ✅ Built |
 | `api/main.py` | FastAPI with 6 endpoints | ✅ Built |
@@ -41,7 +42,10 @@
 | Weather + Solar | Open-Meteo Archive | 26,280 | 3 | FY2024-25 | 0 | `data/external/weather/` |
 | Air Quality | Open-Meteo AQ | 26,280 | 3 | FY2024-25 | 0 | `data/external/air_quality/` |
 | NASA POWER Solar | NASA POWER API | 78,912 | 3 | FY2022-25 (3yr) | 0 | `data/external/nasa_power/` |
-| **Total** | | **131,472** | **3** | | **0** | **4.3 MB** |
+| **Total External** | | **131,472** | **3** | | **0** | **4.3 MB** |
+| Real Meter Data (clean) | APEPDCL MDAS (3-phase) | 68,008 | 5 | Mar 2025 – Feb 2026 | 0 | `data/processed/real_meter_data_clean_100pct.csv` |
+| Training Split (75%) | Stratified temporal | 51,064 | 5 | Mar 2025 – Feb 2026 | 0 | `data/processed/real_meter_data_train_75pct.csv` |
+| Holdout Split (25%) | Every 4th complete day | 16,944 | 5 | Mar 2025 – Feb 2026 | 0 | `data/processed/real_meter_data_holdout_25pct.csv` |
 
 **Per-location files:** 4 per dataset (rajahmundry, srikakulam, visakhapatnam, all_locations combined)
 
@@ -160,6 +164,9 @@
 | AD-13 | M1 module architecture aligned to EIL PRD | ROADMAP restructured from Phase 0-6 to M1-M6 modules matching PRD | Session 6 |
 | AD-14 | India-specific data quality over generic | Voltage SOC, CT artefacts, DG detection, APFC events — 6-12mo moat per PRD defensibility analysis | Session 6 |
 | AD-15 | Quality score per interval | Weighted composite of completeness (0.4), timeliness (0.3), validity (0.2), consistency (0.1) | Session 6 |
+| AD-16 | Stratified temporal holdout over random split | Every 4th complete day → 25% holdout with uniform month/weekend/peak spread; no temporal leakage | Session 10 |
+| AD-17 | LightGBM over Prophet for industrial loads | Sharp on/off transitions in HT demand defeat Fourier seasonality; lag features capture step-function behavior | Session 10 |
+| AD-18 | Real meter data pipeline (MDAS → clean CSV) | Dedup 0-sec gaps, resample to 30min, ffill ≤2h, demand_kw = wh_imp×2/1000 | Session 10 |
 
 
 ---
@@ -174,7 +181,7 @@
 | Open-Meteo Forecast | `api.open-meteo.com/v1/forecast` | 10K/day | Same weather+solar, 7-day ahead | ✅ Code ready |
 | NASA POWER | `power.larc.nasa.gov/api/temporal/hourly/point` | Unlimited | All-sky GHI, clear-sky GHI, T2M, RH, WS | ✅ Pulling |
 | IEX DAM Prices | FY24-25 matrix + synthetic generator | N/A | 8,737 hourly rows, 1.48-20.00 INR/kWh | ⚠️ Synthetic (CSV import ready) |
-| APEPDCL Meter Data | Manual upload | N/A | Consumer demand (kWh) | ❌ Not available |
+| APEPDCL Meter Data | MDAS 3-phase smart meters | Manual upload | 6 HT consumers, 30-min, 788K raw rows | ✅ Loaded & cleaned |
 
 
 ---
@@ -183,7 +190,7 @@
 
 | Gap | Impact | Priority | Path to Fix |
 |-----|--------|----------|-------------|
-| **No real meter data** | Can't validate weather→demand lift with real noise | P0 | Get even 3 months of hourly readings for 1 consumer |
+| ~~**No real meter data**~~ | ~~Fixed~~ | ✅ | 6 HT consumers loaded, cleaned, validated — 4.01% avg MAPE on 25% holdout |
 | **IEX prices are static** | FY24-25 monthly averages, not live 15-min DAM prices | P1 | CSV import module built; need manual exports or future scraper |
 | ~~**CV Fold 1 always high MAPE**~~ | ~~Fixed~~ | ✅ | Expanding window CV with min_train_size=4000 |
 | **No 15-min resolution** | Currently hourly; IEX settles at 15-min blocks | P1 | Interpolate or find 15-min weather data |
@@ -198,7 +205,8 @@
 
 | Hash | Date | Description |
 |------|------|-------------|
-| (pending) | 2026-04-15 | docs: Rewrite README.md, update ROADMAP.md M1 status, add Session 9 progress |
+| (pending) | 2026-04-15 | feat: Real meter data training — 4.01% avg MAPE on 25% holdout across 6 HT consumers |
+| `8379fd6` | 2026-04-15 | docs: Rewrite README.md, update ROADMAP.md M1 status, add Session 9 progress |
 | `32ffbd5` | 2026-04-15 | docs: Session 8 progress — quality/ subpackage refactor, A/A/A ratings |
 | `034c0db` | 2026-04-15 | refactor: Split quality.py into quality/ subpackage |
 | `f022f1d` | 2026-04-15 | docs: Session 7 progress |

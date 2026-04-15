@@ -22,7 +22,9 @@ ENV/
 # Data files (large, keep in data/ but don't commit raw data)
 data/raw/*.xlsx
 data/raw/*.csv
-data/processed/
+data/processed/*
+# Exception: track cleaned real meter data for reproducibility
+!data/processed/real_meter_data_*.csv
 
 # Models (binary artifacts at project root, not source code)
 /models/
