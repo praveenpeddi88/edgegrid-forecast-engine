@@ -397,6 +397,17 @@ class TestVoltageSOCCorrector:
         residuals_ok = pd.Series([1.0] * 14, index=idx)
         assert not corrector.check_calibration_drift(residuals_ok, threshold=2.0)
 
+    def test_calibrate_does_not_mutate_degree(self, corrector):
+        """calibrate() with few points should NOT permanently downgrade polynomial_degree."""
+        # Few points → linear fallback
+        v_few = pd.Series([410, 415, 420])
+        bms_few = pd.Series([48, 50, 52])
+        actual_few = pd.Series([49, 50, 51])
+        corrector.calibrate(v_few, bms_few, actual_few)
+
+        # polynomial_degree should still be 2 (configured default)
+        assert corrector.polynomial_degree == 2
+
     def test_known_state_detection(self, corrector):
         idx = pd.date_range("2025-04-01", periods=200, freq="15min")
         # Simulate rest period: current near zero
@@ -468,6 +479,23 @@ class TestDemandNoiseFilter:
         cleaned, artefact_mask = noise_filter.clean_demand_signal(kva, kw, frequency)
         # Cleaned value should be closer to original
         assert abs(cleaned.iloc[300] - original_300) < abs(kva.iloc[300] - original_300)
+
+    def test_cache_invalidation_on_new_series(self, idx_15min_week):
+        """Cache should invalidate when a new kVA series (different id()) is passed."""
+        np.random.seed(42)
+        n = len(idx_15min_week)
+        filter_ = DemandNoiseFilter()
+
+        kva_1 = pd.Series(500 + np.random.normal(0, 20, n), index=idx_15min_week)
+        kw_1 = pd.Series(400 + np.random.normal(0, 15, n), index=idx_15min_week)
+        filter_.detect_ct_artefacts(kva_1, kw_1)
+        assert filter_._cache_key == id(kva_1)
+
+        # New series → cache should update
+        kva_2 = pd.Series(1000 + np.random.normal(0, 50, n), index=idx_15min_week)
+        filter_.detect_ct_artefacts(kva_2, kw_1)
+        assert filter_._cache_key == id(kva_2)
+        assert filter_._cache_key != id(kva_1)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -864,6 +892,35 @@ class TestEdgeCases:
         cleaned, reports = run_quality_pipeline(df, freq="15min")
         assert len(reports) == 1
         assert reports[0].consumer_id == "C1"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Input Validation Tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestInputValidation:
+
+    def test_zscore_rejects_negative_threshold(self):
+        s = pd.Series([1, 2, 3, 4, 5])
+        with pytest.raises(ValueError, match="threshold must be positive"):
+            detect_outliers_zscore(s, threshold=-1.0)
+
+    def test_iqr_rejects_negative_factor(self):
+        s = pd.Series([1, 2, 3, 4, 5])
+        with pytest.raises(ValueError, match="factor must be positive"):
+            detect_outliers_iqr(s, factor=-1.5)
+
+    def test_dg_detector_rejects_bad_threshold(self):
+        with pytest.raises(ValueError, match="import_drop_threshold_pct"):
+            DGTransitionDetector(import_drop_threshold_pct=0)
+
+    def test_apfc_detector_rejects_bad_pf_range(self):
+        with pytest.raises(ValueError, match="target_pf_range"):
+            APFCSwitchingDetector(target_pf_range=(1.0, 0.5))
+
+    def test_voltage_corrector_rejects_bad_degree(self):
+        with pytest.raises(ValueError, match="polynomial_degree"):
+            VoltageSOCCorrector(polynomial_degree=0)
 
 
 class TestQualityReport:
