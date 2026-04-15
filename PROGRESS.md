@@ -22,7 +22,7 @@
 | `data/features.py` | 112-feature engineering pipeline (8 families) | ✅ Verified |
 | `data/synthetic.py` | Synthetic demand generator for 6 consumer profiles | ✅ Verified |
 | `data/loaders.py` | Data loading utilities | ✅ Built |
-| `data/quality.py` | M1 Data Quality Engine (AMI, voltage SOC, CT/PF, DG, APFC) | ✅ Verified |
+| `data/quality/` | M1 Data Quality Engine — 10-file subpackage (AMI, anomaly, voltage, noise, DG, APFC, imputation, pipeline) | ✅ Verified (A/A/A) |
 | `models/demand.py` | LightGBM + Prophet + Ensemble forecaster | ✅ Verified |
 | `models/foundation.py` | Chronos-Bolt zero-shot forecaster (tiny/mini/small) | ✅ Verified |
 | `models/solar.py` | Solar generation forecast model | ✅ Built |
@@ -267,6 +267,39 @@ Priority follows EIL PRD module architecture: M1 → M2 → M3 → M4.
 ---
 
 ## 10. Session Log
+
+### Session 8 — 2026-04-15
+**Focus:** M1 quality → A+/A/A refactor
+
+What got done:
+- Deep audit of quality.py: cataloged 9 performance, 8 correctness, 5 maintainability issues
+- Split 1,537-line monolith into 10-file quality/ subpackage:
+  - `_constants.py` (83 lines): All magic numbers extracted as named constants
+  - `ami.py` (295 lines): M1-F1 AMI ingestion — vectorized detect_gaps, division-safe consistency
+  - `anomaly.py` (232 lines): M1-F2 detection — consistent NaN handling, input validation
+  - `voltage.py` (227 lines): M1-F3 SOC correction — vectorized known_state_periods
+  - `noise.py` (173 lines): M1-F4 demand filter — cached rolling computations
+  - `dg.py` (173 lines): M1-F5 DG transitions — input validation, string constants
+  - `apfc.py` (156 lines): M1-F6 APFC events — input validation, string constants
+  - `imputation.py` (97 lines): Fixed zero-leak bug in hybrid short gap fill
+  - `pipeline.py` (206 lines): Proper quality scoring, single detector instantiation
+  - `__init__.py` (90 lines): Complete re-exports, zero breaking changes
+- Performance fixes: vectorized detect_gaps and detect_known_state_periods loops,
+  cached baseline rolling computations in DemandNoiseFilter, .where() instead of .replace()
+- Correctness fixes: division-safe physical consistency, .fillna(False) on all edge
+  detectors, proper frequency inference for seasonal imputation, sentinel-free gap fill
+- Added constructor input validation to all 4 detector classes
+- Added __init__ docstrings to all 4 classes
+- 7 new tests: cache invalidation, degree mutation guard, 5 input validation tests
+- Final ratings: Security A, Performance A, Correctness A, Maintainability A, Test Coverage A
+- 127 total tests, all passing
+- Commit `034c0db` pushed to main
+
+Key architectural decisions:
+- AD-16: Subpackage over monolith — each M1 feature gets its own file (max 295 lines)
+- AD-17: Named constants > magic numbers — _constants.py is single source of truth
+- AD-18: Input validation on constructors — fail fast with clear error messages
+- AD-19: Cache rolling computations in DemandNoiseFilter (identity-based invalidation)
 
 ### Session 7 — 2026-04-15
 **Focus:** M1 code review fixes + test coverage hardening
