@@ -24,8 +24,8 @@ data/raw/*.xlsx
 data/raw/*.csv
 data/processed/
 
-# Models (binary, large)
-models/
+# Models (binary artifacts at project root, not source code)
+/models/
 *.joblib
 *.pkl
 *.h5
