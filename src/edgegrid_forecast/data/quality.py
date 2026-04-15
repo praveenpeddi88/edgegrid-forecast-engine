@@ -11,7 +11,7 @@ Handles India-specific data quality problems that generic pipelines miss:
 PRD Reference: Module M1, Features M1-F1 through M1-F6
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
@@ -66,6 +66,9 @@ def detect_gaps(
     """
     if not isinstance(series.index, pd.DatetimeIndex):
         raise ValueError("Series must have a DatetimeIndex")
+
+    if len(series) < 2:
+        return pd.DataFrame(columns=["gap_start", "gap_end", "gap_intervals", "gap_duration_min"])
 
     expected = pd.date_range(series.index.min(), series.index.max(), freq=freq)
     missing = expected.difference(series.dropna().index)
@@ -244,7 +247,7 @@ def validate_physical_ranges(
     df = df.copy()
     for ch, (lo, hi) in ranges.items():
         if ch in df.columns:
-            valid = (df[ch] >= lo) & (df[ch] <= hi) | df[ch].isna()
+            valid = ((df[ch] >= lo) & (df[ch] <= hi)) | df[ch].isna()
             df[f"{ch}_range_valid"] = valid
             invalid_pct = (~valid).mean() * 100
             if invalid_pct > 0:
@@ -370,18 +373,15 @@ def detect_frozen_readings(
     Returns:
         Boolean mask where True = frozen reading
     """
-    mask = pd.Series(False, index=series.index)
-
     diff = series.diff()
     is_same = (diff == 0) & series.notna()
 
     run_starts = is_same & ~is_same.shift(1, fill_value=False)
     run_id = run_starts.cumsum()
 
-    for rid in run_id[is_same].unique():
-        run_mask = run_id == rid
-        if run_mask.sum() >= min_run_length:
-            mask |= run_mask
+    # Vectorized: compute run lengths via groupby.transform, then threshold
+    run_lengths = is_same.groupby(run_id).transform("sum")
+    mask = is_same & (run_lengths >= min_run_length)
 
     return mask
 
@@ -441,14 +441,16 @@ def detect_outliers_contextual(
     else:
         groups = series.index.hour
 
-    for g in np.unique(groups):
-        idx = groups == g
-        subset = series[idx].dropna()
-        if len(subset) < 5:
-            continue
-        z = np.abs(stats.zscore(subset))
-        flagged = subset.index[z > threshold]
-        mask.loc[flagged] = True
+    # Vectorized: compute z-scores within each group using groupby.transform
+    grouped = series.groupby(groups)
+    group_mean = grouped.transform("mean")
+    group_std = grouped.transform("std")
+    group_count = grouped.transform("count")
+
+    # Only flag groups with enough data (≥5) and non-zero std
+    valid = (group_count >= 5) & (group_std > 0) & series.notna()
+    z_scores = ((series - group_mean) / group_std).abs()
+    mask = valid & (z_scores > threshold)
 
     return mask
 
@@ -621,19 +623,20 @@ class VoltageSOCCorrector:
         v = voltage[valid].values.reshape(-1, 1)
         e = soc_error[valid].values
 
+        effective_degree = self.polynomial_degree
         if len(v) < self.min_calibration_points:
             logger.warning(
                 f"Only {len(v)} calibration points (need {self.min_calibration_points}). "
                 "Using linear model — collect more data for polynomial."
             )
-            self.polynomial_degree = 1
+            effective_degree = 1
 
         # Voltage deviation from nominal as feature
         v_deviation = v - self.nominal_voltage
 
         # Polynomial features
         self.poly_features = PolynomialFeatures(
-            degree=self.polynomial_degree, include_bias=False
+            degree=effective_degree, include_bias=False
         )
         v_poly = self.poly_features.fit_transform(v_deviation)
 
@@ -1009,16 +1012,20 @@ class DGTransitionDetector:
         """
         dg_on = self.detect_grid_to_dg(grid_import, site_load)
 
-        # Optional voltage confirmation
+        # Optional voltage confirmation — soft signal, does not override primary
+        dg_confidence = pd.Series("medium", index=grid_import.index)
+        dg_confidence[~dg_on] = "none"
+
         if voltage is not None:
             dg_voltage = self.detect_voltage_signature(voltage)
-            # Use voltage as soft confirmation: strengthen DG signal, don't override
-            # If grid_import says DG and voltage confirms, high confidence
-            # If grid_import says DG but voltage doesn't, still flag but lower confidence
-            dg_on = dg_on  # Keep primary signal; voltage used in confidence below
+            # Voltage confirms DG → high confidence
+            dg_confidence[dg_on & dg_voltage] = "high"
+            # Voltage doesn't confirm but import says DG → keep medium
+            # (could be a short outage where DG voltage hasn't diverged yet)
 
         result = pd.DataFrame(index=grid_import.index)
         result["is_dg"] = dg_on
+        result["dg_confidence"] = dg_confidence
         result["dg_event_type"] = None
 
         # Assign period IDs to consecutive DG blocks
@@ -1248,17 +1255,18 @@ class APFCSwitchingDetector:
         """
         normalized = kva.copy()
 
-        for idx in apfc_events.index[apfc_events["is_apfc_event"]]:
-            # Use kW / pre-event PF to compute what kVA "should have been"
-            pos = kva.index.get_loc(idx)
-            if pos > 0:
-                prev_kva = kva.iloc[pos - 1]
-                prev_kw = kw.iloc[pos - 1]
-                if prev_kva > 0:
-                    prev_pf = prev_kw / prev_kva
-                    if prev_pf > 0:
-                        # kVA = kW / PF with the pre-event PF
-                        normalized.iloc[pos] = kw.iloc[pos] / prev_pf
+        event_mask = apfc_events["is_apfc_event"]
+        if not event_mask.any():
+            return normalized
+
+        # Vectorized: compute pre-event PF and apply correction at all event positions
+        prev_kva = kva.shift(1)
+        prev_kw = kw.shift(1)
+        prev_pf = prev_kw / prev_kva
+
+        # Mask: is APFC event AND has valid pre-event PF
+        correctable = event_mask & (prev_kva > 0) & (prev_pf > 0) & prev_kva.notna()
+        normalized[correctable] = kw[correctable] / prev_pf[correctable]
 
         return normalized
 
@@ -1297,10 +1305,12 @@ def impute_missing_and_anomalous(
         result = result.ffill(limit=3).bfill(limit=3)
 
     elif method == "seasonal":
-        for i in result.index[result.isna()]:
-            lookback = i - pd.Timedelta(hours=168)  # 7 days
-            if lookback in result.index and pd.notna(result[lookback]):
-                result[i] = result[lookback]
+        # Vectorized: fill from same interval 7 days ago (672 periods at 15min)
+        freq = pd.tseries.frequencies.to_offset(pd.infer_freq(result.index) or "15min")
+        periods_per_week = int(pd.Timedelta(days=7) / pd.Timedelta(freq.nanos, unit="ns"))
+        week_shift = result.shift(periods=periods_per_week)
+        still_nan = result.isna()
+        result[still_nan] = week_shift[still_nan]
         result = result.interpolate(method="time", limit=6)
 
     elif method == "hybrid":
@@ -1315,12 +1325,15 @@ def impute_missing_and_anomalous(
         result_short = result_short.interpolate(method="time")
         result[short_gap] = result_short[short_gap]
 
-        # Long gaps: seasonal (same interval, 7 days ago)
-        long_gap = nan_mask & (gap_lengths >= short_gap_limit)
-        for i in result.index[long_gap]:
-            lookback = i - pd.Timedelta(hours=168)
-            if lookback in result.index and pd.notna(result[lookback]):
-                result[i] = result[lookback]
+        # Long gaps: vectorized seasonal (same interval, 7 days ago)
+        long_gap = result.isna()  # Re-check after short gap fill
+        if long_gap.any():
+            freq = pd.tseries.frequencies.to_offset(
+                pd.infer_freq(result.index) or "15min"
+            )
+            periods_per_week = int(pd.Timedelta(days=7) / pd.Timedelta(freq.nanos, unit="ns"))
+            week_shift = result.shift(periods=periods_per_week)
+            result[long_gap] = week_shift[long_gap]
 
         result = result.interpolate(method="time", limit=6)
 

@@ -26,6 +26,7 @@ from edgegrid_forecast.data.quality import (
     detect_frozen_readings,
     detect_gaps,
     detect_outliers_contextual,
+    detect_outliers_isolation_forest,
     detect_outliers_iqr,
     detect_outliers_rolling,
     detect_outliers_zscore,
@@ -516,6 +517,24 @@ class TestDGTransitionDetector:
         has_transition = (result["dg_event_type"] == "grid_to_dg").any()
         assert has_transition
 
+    def test_dg_confidence_column(self, dg_detector, idx_15min_week):
+        """mark_dg_periods should include dg_confidence (none/medium/high)."""
+        np.random.seed(42)
+        n = len(idx_15min_week)
+        # Normal grid import with a DG event injected
+        grid_import = pd.Series(500 + np.random.normal(0, 20, n), index=idx_15min_week)
+        site_load = pd.Series(500 + np.random.normal(0, 10, n), index=idx_15min_week)
+        voltage = pd.Series(415 + np.random.normal(0, 1, n), index=idx_15min_week)
+
+        # Inject DG: grid drops to near-zero, load continues, voltage gets noisy
+        grid_import.iloc[200:240] = np.random.uniform(0, 10, 40)
+        voltage.iloc[200:240] = 410 + np.random.normal(0, 30, 40)
+
+        result = dg_detector.mark_dg_periods(grid_import, site_load, voltage)
+        assert "dg_confidence" in result.columns
+        valid_values = {"none", "medium", "high"}
+        assert set(result["dg_confidence"].unique()).issubset(valid_values)
+
     def test_exclude_dg_from_training(self, dg_detector, grid_import_with_dg):
         df = pd.DataFrame({"demand": grid_import_with_dg})
         mask = dg_detector.detect_grid_to_dg(grid_import_with_dg)
@@ -729,6 +748,122 @@ class TestQualityPipeline:
         cleaned, _ = run_quality_pipeline(df)
         assert "demand_kwh_original" in cleaned.columns
         assert cleaned.loc[cleaned["is_anomaly"], "demand_kwh_original"].iloc[0] == 2000
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# T-1: Isolation Forest Tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestIsolationForest:
+
+    def test_detects_multivariate_outlier(self, idx_15min):
+        """Isolation Forest should flag points that are outliers in multivariate space."""
+        np.random.seed(42)
+        n = len(idx_15min)
+        df = pd.DataFrame({
+            "kw": 500 + np.random.normal(0, 20, n),
+            "kvar": 150 + np.random.normal(0, 10, n),
+        }, index=idx_15min)
+        # Inject a multivariate outlier (high kW AND high kVAR simultaneously)
+        df.loc[df.index[50], "kw"] = 900
+        df.loc[df.index[50], "kvar"] = 500
+        mask = detect_outliers_isolation_forest(df, columns=["kw", "kvar"], contamination=0.05)
+        assert mask.iloc[50], "Multivariate outlier at index 50 should be flagged"
+
+    def test_low_false_positive_rate(self, idx_15min_week):
+        """Clean multivariate data should produce very few outlier flags."""
+        np.random.seed(42)
+        n = len(idx_15min_week)
+        df = pd.DataFrame({
+            "kw": 500 + np.random.normal(0, 20, n),
+            "kvar": 150 + np.random.normal(0, 10, n),
+        }, index=idx_15min_week)
+        mask = detect_outliers_isolation_forest(df, columns=["kw", "kvar"], contamination=0.05)
+        # Should flag roughly ≤contamination fraction
+        assert mask.mean() < 0.10
+
+    def test_returns_boolean_series(self, idx_15min):
+        """Return type should be a boolean pandas Series."""
+        np.random.seed(42)
+        n = len(idx_15min)
+        df = pd.DataFrame({
+            "kw": 500 + np.random.normal(0, 20, n),
+        }, index=idx_15min)
+        mask = detect_outliers_isolation_forest(df, columns=["kw"])
+        assert isinstance(mask, pd.Series)
+        assert mask.dtype == bool
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# T-2: Physical Range Validation with NaN
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestPhysicalRangesEdgeCases:
+
+    def test_nan_values_pass_range_check(self, idx_15min):
+        """NaN values should pass range validation (not flagged as out-of-range)."""
+        df = pd.DataFrame({
+            "kw": [100.0, np.nan, 200.0, np.nan, 300.0] + [250.0] * (len(idx_15min) - 5),
+        }, index=idx_15min)
+        ranges = {"kw": (0, 1000)}
+        result = validate_physical_ranges(df, ranges)
+        # NaN positions should be True (valid) — NaN is "no data", not "bad data"
+        assert result["kw_range_valid"].iloc[1] == True
+        assert result["kw_range_valid"].iloc[3] == True
+
+    def test_all_nan_column(self, idx_15min):
+        """An all-NaN column should have all-True range validity."""
+        df = pd.DataFrame({
+            "kw": [np.nan] * len(idx_15min),
+        }, index=idx_15min)
+        ranges = {"kw": (0, 1000)}
+        result = validate_physical_ranges(df, ranges)
+        assert result["kw_range_valid"].all()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# T-3: Empty and Single-Row Edge Cases
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestEdgeCases:
+
+    def test_detect_gaps_empty_series(self):
+        """detect_gaps on empty DatetimeIndex series should return empty DataFrame."""
+        s = pd.Series(dtype=float, index=pd.DatetimeIndex([], freq="15min"))
+        gaps = detect_gaps(s, freq="15min")
+        assert len(gaps) == 0
+
+    def test_detect_frozen_single_value(self):
+        """Single-value series should not flag frozen readings."""
+        idx = pd.date_range("2025-04-01", periods=1, freq="15min")
+        s = pd.Series([100.0], index=idx)
+        mask = detect_frozen_readings(s, min_run_length=3)
+        assert not mask.any()
+
+    def test_zscore_two_values(self):
+        """Z-score with only 2 values should not crash."""
+        idx = pd.date_range("2025-04-01", periods=2, freq="15min")
+        s = pd.Series([100.0, 200.0], index=idx)
+        mask = detect_outliers_zscore(s, threshold=3.0)
+        assert len(mask) == 2
+
+    def test_impute_no_missing(self, idx_15min):
+        """Imputation on complete data should return identical series."""
+        s = pd.Series(500 + np.arange(len(idx_15min), dtype=float), index=idx_15min)
+        result = impute_missing_and_anomalous(s, method="hybrid")
+        pd.testing.assert_series_equal(result, s)
+
+    def test_quality_pipeline_single_consumer(self):
+        """Pipeline should handle a single consumer without error."""
+        idx = pd.date_range("2025-04-01", periods=96, freq="15min")
+        df = pd.DataFrame({
+            "timestamp": idx,
+            "consumer_id": "C1",
+            "demand_kwh": 500 + np.random.normal(0, 20, 96),
+        })
+        cleaned, reports = run_quality_pipeline(df, freq="15min")
+        assert len(reports) == 1
+        assert reports[0].consumer_id == "C1"
 
 
 class TestQualityReport:
