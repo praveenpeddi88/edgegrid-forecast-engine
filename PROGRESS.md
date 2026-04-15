@@ -22,7 +22,7 @@
 | `data/features.py` | 112-feature engineering pipeline (8 families) | ✅ Verified |
 | `data/synthetic.py` | Synthetic demand generator for 6 consumer profiles | ✅ Verified |
 | `data/loaders.py` | Data loading utilities | ✅ Built |
-| `data/quality.py` | Data quality checks | ✅ Built |
+| `data/quality.py` | M1 Data Quality Engine (AMI, voltage SOC, CT/PF, DG, APFC) | ✅ Verified |
 | `models/demand.py` | LightGBM + Prophet + Ensemble forecaster | ✅ Verified |
 | `models/foundation.py` | Chronos-Bolt zero-shot forecaster (tiny/mini/small) | ✅ Verified |
 | `models/solar.py` | Solar generation forecast model | ✅ Built |
@@ -157,6 +157,9 @@
 | AD-10 | Expanding window CV (min 4000 rows) | Default TimeSeriesSplit starves fold 1; expanding window gives stable folds | Session 5 |
 | AD-11 | IEX synthetic prices with log-normal noise | No public API exists; synthetic with 12% volatility + 5% spike probability | Session 5 |
 | AD-12 | Autoregressive rollout for Chronos >64 steps | Native horizon is 64; feed predictions back as context for 168h forecasts | Session 5 |
+| AD-13 | M1 module architecture aligned to EIL PRD | ROADMAP restructured from Phase 0-6 to M1-M6 modules matching PRD | Session 6 |
+| AD-14 | India-specific data quality over generic | Voltage SOC, CT artefacts, DG detection, APFC events — 6-12mo moat per PRD defensibility analysis | Session 6 |
+| AD-15 | Quality score per interval | Weighted composite of completeness (0.4), timeliness (0.3), validity (0.2), consistency (0.1) | Session 6 |
 
 
 ---
@@ -195,6 +198,10 @@
 
 | Hash | Date | Description |
 |------|------|-------------|
+| (pending) | 2026-04-15 | feat: M1 Data Quality Engine — AMI, voltage SOC, CT/PF, DG, APFC |
+| `ec5b86f` | 2026-04-15 | docs: Rewrite README.md |
+| `eb64863` | 2026-04-15 | docs: Add phased ROADMAP.md |
+| `a5d003c` | 2026-04-15 | docs: Update PROGRESS.md |
 | `c309b98` | 2026-04-15 | feat: Chronos-Bolt foundation model, IEX price collector, CV fix |
 | `122b765` | 2026-04-15 | docs: Add PROGRESS.md project tracker |
 | `d57174d` | 2026-04-15 | feat: 112-feature pipeline with weather/solar/AQ + training infrastructure |
@@ -205,34 +212,38 @@
 
 ---
 
-## 8. Next Steps (Prioritized)
+## 8. Next Steps (Module-Aligned)
 
-### Immediate (Next Session)
+Priority follows EIL PRD module architecture: M1 → M2 → M3 → M4.
 
-- [ ] **Real meter data** — even partial data for one consumer unlocks real validation (P0 blocker)
-- [ ] **Solar generation model** — use GHI/DNI/DHI + panel specs to predict kWh output
-- [ ] **Dispatch optimizer v2** — feed actual forecasts into BESS dispatch loop
+### M1 Data Quality — Remaining
 
-### Short-term (Next 2-3 Sessions)
+- [ ] **Real meter data** — test all M1 detectors on actual APEPDCL AMI data (P0 blocker)
+- [ ] **15-min resolution** — M1 pipeline handles 15-min but needs real 15-min data to validate
+- [ ] **Contextual anomaly tuning** — thresholds need calibration per consumer type
 
-- [ ] **TimesFM 2.5** — Google's foundation model for time series
-- [ ] **15-min resolution** — interpolate weather data to match IEX settlement periods
-- [ ] **IEX manual CSV import** — get real DAM prices from manual website export
-- [ ] **Ensemble: LightGBM + Chronos** — weighted combination for production forecasts
-- [ ] **Conformal prediction** — replace the naive ±15% uncertainty bounds
+### M2 Forecasting — Next Module
 
-### Medium-term
+- [ ] **Solar generation model** — GHI/DNI/DHI + panel specs → kWh output (M2-F2)
+- [ ] **15-min demand model** — retrain LightGBM at 96-interval/day resolution
+- [ ] **Ensemble: LightGBM + Chronos** — weighted combination (M2-F4)
+- [ ] **Conformal prediction** — calibrated uncertainty bounds (M2-F4)
 
-- [ ] **MOIRAI-2** — Salesforce foundation model, probabilistic forecasts
-- [ ] **Real-time pipeline** — Open-Meteo forecast API → model inference → dispatch recommendation
-- [ ] **Multi-consumer aggregation** — portfolio-level dispatch across all 6 consumers
-- [ ] **Dashboard** — live forecast vs actual comparison for model monitoring
+### M3 Optimization — After M2
+
+- [ ] **MPC controller** — replace greedy dispatch with 48h MPC (M3-F1)
+- [ ] **Fix BUG-2** — iex_arbitrage_savings hardcoded to 0 (M3, critical)
+- [ ] **kVA-based demand charges** — India uses apparent power, not active (DEBT-7)
+- [ ] **BESS degradation model** — cycle/calendar aging in dispatch economics (M3-F2)
 
 ### Completed ✅
 
-- [x] **Chronos-Bolt integration** — 8.9% MAPE zero-shot, beats naive by 2.0pp (Session 5)
-- [x] **IEX price collector** — CSV parser + synthetic generator with realistic noise (Session 5)
-- [x] **Fix CV fold 1** — expanding window CV with min_train_size=4000 (Session 5)
+- [x] **M1 Data Quality Engine** — 6 India-specific detectors + 52 tests (Session 6)
+- [x] **ROADMAP restructured to PRD modules** — M1-M6 alignment (Session 6)
+- [x] **README.md rewrite** — product + engineering documentation (Session 6)
+- [x] **Chronos-Bolt integration** — 8.9% MAPE zero-shot (Session 5)
+- [x] **IEX price collector** — CSV parser + synthetic generator (Session 5)
+- [x] **Fix CV fold 1** — expanding window CV min_train_size=4000 (Session 5)
 
 
 ---
@@ -249,11 +260,40 @@
 | `src/edgegrid_forecast/models/foundation.py` | Chronos-Bolt zero-shot forecaster |
 | `src/edgegrid_forecast/data/collectors/iex_prices.py` | IEX DAM price collector (CSV + synthetic) |
 | `src/edgegrid_forecast/data/collectors/pull_all.py` | Data collection orchestrator |
+| `ROADMAP.md` | Module-aligned roadmap (M1-M6) matching EIL PRD |
+| `tests/test_quality.py` | 52 tests covering all M1 features |
 
 
 ---
 
 ## 10. Session Log
+
+### Session 6 — 2026-04-15
+**Focus:** PRD alignment + M1 Data Quality Engine (India-specific)
+
+What got done:
+- Analyzed full EIL PRD document (12 sections, 25 tables, 6 modules M1-M6)
+- Identified gap: our engine is ~70% on M2 (Forecasting) but only ~10% on M1 (Data Quality)
+- Restructured ROADMAP.md from Phase 0-6 to M1-M6 module architecture matching the PRD
+- Built complete M1 Data Quality Engine in `quality.py` (231 → 720+ lines):
+  - M1-F1: AMI ingestion — gap detection, duplicate handling, late arrivals, channel sync, range validation, physical consistency, quality scoring
+  - M1-F2: Enhanced anomaly detection — added contextual (time-of-day z-score) and rolling (48h baseline) outlier detectors
+  - M1-F3: VoltageSOCCorrector class — polynomial regression for voltage→SOC error, calibration/correction/drift detection, known-state period detection
+  - M1-F4: DemandNoiseFilter class — CT artefact detection (rolling baseline + frequency), PF artefact detection (kVA spike + stable kW), signal cleaning
+  - M1-F5: DGTransitionDetector class — grid import drop detection, voltage signature, DG period marking with transition labels, training data exclusion
+  - M1-F6: APFCSwitchingDetector class — kVA step detection, kW stability confirmation, PF jump classification, DR baseline normalization
+- Full integration: `run_quality_pipeline()` orchestrates all M1 detectors per consumer
+- QualityReport dataclass for structured reporting per consumer
+- Wrote 52 comprehensive tests covering all M1 features — all passing
+- Full test suite: 109 tests, all green
+- Updated README.md (previous session) and PROGRESS.md
+
+Key architectural decisions:
+- AD-13: ROADMAP aligned to EIL PRD M1-M6 module structure
+- AD-14: India-specific quality > generic — these detectors create 6-12mo replication moat
+- AD-15: Per-interval quality score as weighted composite (completeness/timeliness/validity/consistency)
+
+Key insight: Indian grid data has 5 unique noise sources that generic quality pipelines miss. Building these detectors first creates defensibility per PRD's moat analysis (voltage SOC = 6-12mo, demand filter = 3-6mo). M1 is now the strongest module in our stack.
 
 ### Session 5 — 2026-04-15
 **Focus:** Foundation models + IEX price infrastructure + CV robustness

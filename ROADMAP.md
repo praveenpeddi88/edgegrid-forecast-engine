@@ -1,452 +1,381 @@
-# EdgeGrid Forecast Engine — Phased Roadmap
+# EdgeGrid Forecast Engine — Module Roadmap
 
 > **Mission:** Predictive dispatch engine for BESS + solar at APEPDCL HT consumer substations
 > **Outcome:** Reduce landed cost of electricity for C&I consumers by 12-18% through optimal battery dispatch
 > **Owner:** Praveen Peddi | **Repo:** `praveenpeddi88/edgegrid-forecast-engine`
+> **Architecture reference:** EIL PRD v1 (M1-M6 module architecture)
 > **Last updated:** 2026-04-15
 
 ---
 
 ## How to Use This Document
 
-Each phase has a clear **outcome**, **acceptance criteria**, and **task breakdown**. Phases are sequential — each builds on the previous. Within a phase, tasks are ordered by dependency. Check off tasks as they're completed. Every session should start by reading this file and picking up from the current phase.
+This roadmap mirrors the EIL PRD's modular architecture (M1–M6). Modules M1–M3 are shared infrastructure; M4–M6 are asset-specific execution layers. Within each module, features are tagged M{x}-F{y} matching the PRD. Every session should start by reading this file and PROGRESS.md, then pick up the next unchecked task.
 
 **Status key:** ✅ Done | 🔧 In Progress | ⬚ Not Started | ⛔ Blocked
 
 ---
 
-## Phase 0 — Foundation (COMPLETE ✅)
+## Module Map & Dependencies
 
-**Outcome:** A working forecast + dispatch prototype on synthetic data that proves the architecture.
+```
+M1 Data Quality Engine ─────────┐
+  (clean, validate, correct)     │
+                                 ▼
+M2 Forecasting Engine ──────► M3 Optimization Engine (MPC)
+  (demand, solar, price)         (dispatch, sizing)
+                                 │
+                    ┌────────────┼────────────┐
+                    ▼            ▼            ▼
+              M4 BESS        M5 DR        M6 Explain-
+              Execution      Engine       ability
+              (charge/       (baseline,   (SHAP, audit,
+               discharge)     curtail)     reports)
+```
+
+**Critical path:** M1 → M2 → M3 → M4
+**Phase 1 (EIL PRD, 10 weeks):** M1 complete + M2 demand + M3 greedy dispatch + M6 basic explainability
+**Defensibility order:** M1 (voltage SOC = 6-12mo moat) → M2 (load forecast = 12-18mo moat)
+
+---
+
+## Foundation (Phase 0) — COMPLETE ✅
+
+Everything built before the PRD alignment. This work maps across M2, M3, and M4 in the module architecture.
 
 **What we proved:**
-- LightGBM demand forecasting works: 2.27% val MAPE, 7.14% CV MAPE on synthetic data
-- Chronos-Bolt zero-shot forecasting works: 8.9% avg MAPE with zero training
-- Weather data pipeline pulls 131K rows from 4 free APIs with zero nulls
-- 112-feature engineering pipeline across 8 families is modular and toggleable
-- BESS dispatch optimizer runs 24h simulations with 3 charging strategies
-- FastAPI serves 6 endpoints for forecasts + dispatch
-- IEX price infrastructure handles CSV import + synthetic fallback
+- LightGBM demand forecasting: 2.27% val MAPE, 7.14% CV MAPE on synthetic data
+- Chronos-Bolt zero-shot: 8.9% avg MAPE with zero training
+- Weather pipeline: 131K rows from 4 APIs, zero nulls
+- 112-feature engineering pipeline: 8 families, modular, toggleable
+- BESS dispatch optimizer: 24h simulation, 3 charging strategies
+- FastAPI: 6 endpoints for forecasts + dispatch
+- IEX price infrastructure: CSV import + synthetic fallback
+- Landed cost calculator with APEPDCL losses + network charges
 
-**Architecture decisions locked in:**
-- LightGBM primary, Chronos cold-start, Prophet sanity check (AD-1, AD-9)
-- Parquet storage, Open-Meteo + NASA POWER for weather, Asia/Kolkata timezone (AD-2, AD-3, AD-7)
-- Expanding window CV with min_train_size=4000 (AD-10)
-
-### Tasks (all complete)
-
-- [x] LightGBM demand forecaster with train/predict/cross-validate/save/load
-- [x] Prophet secondary model + ensemble with inverse-MAPE weighting
-- [x] Chronos-Bolt zero-shot forecaster with autoregressive rollout
-- [x] 112-feature pipeline: temporal, lag, rolling, price, consumption, weather, solar, AQ, interactions
-- [x] Open-Meteo weather + solar + AQ collectors with chunked pulls
-- [x] NASA POWER collector for cross-validation
-- [x] IEX price collector: CSV parser + synthetic generator
-- [x] Synthetic demand generator for 6 consumer profiles
-- [x] BESS dispatch optimizer with solar/grid/IEX arbitrage
-- [x] FastAPI with health, consumers, demand/solar/price forecast, dispatch endpoints
-- [x] Landed cost calculator with APEPDCL transmission/distribution losses + network charges
-- [x] Test suite: 35+ tests across constants, dispatch, solar, price, features, API
-- [x] PROGRESS.md tracking document
+**Architecture decisions locked:** AD-1 through AD-12 (see PROGRESS.md)
 
 ---
 
-## Phase 1 — Solar Generation Model (NEXT ⬚)
+## M1 — Data Quality Engine 🔧
 
-**Outcome:** Accurate hourly solar kWh predictions for each substation, so the dispatch optimizer knows how much free energy is available before deciding when to charge/discharge the battery.
+**PRD reference:** Module M1, Features M1-F1 through M1-F6
+**Why first:** Every downstream model is only as good as the data feeding it. Indian grid data has unique noise patterns (voltage swings, DG transitions, CT artefacts, AMI packet loss) that generic quality pipelines miss entirely. Building these India-specific detectors creates a 6-12 month replication barrier.
 
-**Why this matters:**
-Solar generation is the single biggest input to BESS dispatch economics. If you overestimate solar, the battery charges from grid when it shouldn't. If you underestimate, free solar energy gets curtailed. A 10% error in solar forecast at a 1 MW plant = ~150 kWh/day of suboptimal dispatch = ₹750-1500/day of avoidable cost.
+**Phase 1 acceptance criteria (from PRD):**
+- [ ] AMI ingestion handles NULL, duplicates, late arrivals for 15-min resolution
+- [ ] Voltage-compensated SOC within ±2% of lab-calibrated reference
+- [ ] Demand noise filter removes CT artefacts correlated with frequency deviation
+- [ ] DG transition detection flags grid→DG switchover events with <1 interval latency
+- [ ] APFC events excluded from DR baselines automatically
+- [ ] Data quality score computed per interval, per signal, per consumer
 
-**Acceptance criteria:**
-- [ ] Solar model produces hourly kWh forecasts for each of the 3 locations
-- [ ] Physics baseline (clear-sky GHI → panel output) matches pvlib within 5%
-- [ ] ML correction layer trained on Open-Meteo weather improves over physics-only by >10%
-- [ ] Cloud cover, temperature derating, and soiling accounted for
-- [ ] 24h-ahead solar forecast MAPE < 15% (industry standard for Indian locations)
-- [ ] Output format compatible with dispatch optimizer's `solar_kwh` input
+### M1-F1: Smart Meter AMI Ingestion ⬚
 
-### Task Breakdown
+**Problem:** Indian AMI networks have 15-40% packet loss. Meters send 15-min interval data that arrives with gaps, duplicates, and late packets. Multi-channel meters report kW, kVAR, kVA, voltage, current, PF — all must be synchronized.
 
-**1.1 — Validate existing solar.py physics layer** ⬚
-- `clear_sky_irradiance()` currently uses a simplified solar position model
-- Compare against pvlib's `clearsky.ineichen()` for Visakhapatnam coordinates
-- Verify GHI magnitude (expect 800-1050 W/m² peak for coastal AP)
-- Check: does the current model handle tilt angle and azimuth correctly?
-- File: `src/edgegrid_forecast/models/solar.py` lines 50-120
+**Detection logic:**
+- NULL check: any channel missing for an interval → flag
+- Duplicate detection: same timestamp + same meter → keep latest by arrival time
+- Late arrival: packet timestamp > 2 intervals behind wall clock → flag but accept
+- Multi-channel sync: all channels present for an interval OR entire interval flagged
+- Gap detection: missing intervals in 15-min sequence → interpolate if <4 intervals, flag if ≥4
 
-**1.2 — Build panel output converter** ⬚
-- Convert GHI (W/m²) → AC power output (kW) for a given panel configuration
-- Inputs: GHI, ambient temperature, wind speed, panel specs (capacity, efficiency, temp coefficient)
-- Apply temperature derating: efficiency drops ~0.4%/°C above 25°C (crystalline silicon)
-- Apply inverter efficiency curve (typically 95-97% at rated load, drops at low/high load)
-- Apply soiling factor from air quality features (PM2.5 → soiling_index already in features.py)
-- Output: hourly kW per installed kW_peak (capacity factor)
-- Reference: PVWatts methodology
+**Implementation:**
+- [ ] `ingest_ami_packet(meter_id, timestamp, channels: dict)` — single packet handler
+- [ ] `detect_gaps(series, freq="15min")` — find missing intervals in a 15-min sequence
+- [ ] `handle_duplicates(df, timestamp_col, meter_col)` — dedup keeping latest arrival
+- [ ] `handle_late_arrivals(df, max_delay_intervals=8)` — flag late but accept within window
+- [ ] `sync_channels(df, required_channels=["kw","kvar","kva","voltage","current","pf"])` — ensure multi-channel alignment
+- [ ] `compute_interval_quality_score(row)` — 0-1 score: 1.0 = all channels present + on-time, degraded for late/imputed/partial
 
-**1.3 — Train ML correction model** ⬚
-- Features: clear_sky_ghi (physics), cloud_cover, temperature_2m, humidity, wind_speed, aerosol_optical_depth, hour, month, day_of_week
-- Target: actual_generation / clear_sky_generation (correction ratio, 0 to 1.2)
-- Model: LightGBM regressor (consistent with demand model approach)
-- Training data: 8,760 hours × 3 locations from Open-Meteo
-- Note: without real generation data, train on synthetic generation = physics × cloud_factor × noise
-- Validation: hold out last 2 months, check MAPE
+**Location:** `src/edgegrid_forecast/data/quality.py` (extend existing)
 
-**1.4 — Create hybrid forecast pipeline** ⬚
-- Blend: `final_kwh = physics_baseline × ml_correction_ratio`
-- The physics layer guarantees physical constraints (no generation at night, seasonal patterns)
-- The ML layer learns local cloud/weather patterns that physics alone misses
-- Currently solar.py has a 40%/60% blend hardcoded (line 205) — make this learnable
-- Add uncertainty bounds: use quantile regression or bootstrap residuals
+### M1-F2: Statistical Anomaly Detection ✅ (basic)
 
-**1.5 — Integrate with dispatch optimizer** ⬚
-- `dispatch/optimizer.py` already accepts `solar_kwh` as a 24-element array
-- Create a helper: `forecast_solar_for_dispatch(location_id, date, capacity_kw)` → 24-element array
-- This becomes the bridge between forecast and dispatch modules
-- Test: run dispatch for 1 week with solar forecast vs zero solar — verify savings increase
+**Current state:** `quality.py` has z-score, IQR, and Isolation Forest detectors + frozen reading detection. These are generic and work.
 
-**1.6 — Benchmark and document** ⬚
-- Metrics: MAE, MAPE, RMSE for each location
-- Compare: physics-only vs ML-only vs hybrid
-- Compute: capacity factor distribution (should be 15-22% for coastal AP)
-- Add results to PROGRESS.md Section 2
+**Gaps to fill:**
+- [ ] Add contextual anomaly detection: a value normal at 2pm might be anomalous at 2am
+- [ ] Time-of-day z-score: compute z-score within same hour-of-day band
+- [ ] Rolling baseline z-score: z-score against 48h rolling window (not global)
 
----
+### M1-F3: Voltage Compensation / SOC Correction ⬚
 
-## Phase 2 — Dispatch Loop Integration ⬚
+**Problem:** Indian grid voltage deviates ±10-15% from nominal (typical range: 380-440V on 415V nominal). BMS calculates SOC from terminal voltage using a curve calibrated at nominal voltage. When grid voltage is 430V, BMS over-reports SOC by 3-8%. When 390V, it under-reports. This makes dispatch decisions wrong — the optimizer thinks the battery has more/less energy than it actually does.
 
-**Outcome:** A complete simulation loop that takes demand forecast + solar forecast + IEX prices and produces an optimal BESS charge/discharge schedule with ₹ savings quantified per consumer per day.
+**Detection & correction logic:**
+- Collect (voltage, BMS_SOC, actual_SOC) triplets during known-state periods (full charge, full discharge, rest periods)
+- Build site-specific voltage→SOC_error regression (linear initially, polynomial if non-linear)
+- Apply: `corrected_SOC = BMS_SOC - voltage_soc_error(current_voltage)`
+- Calibration period: 30-60 days of operational data per site
+- Re-calibrate trigger: if correction residual exceeds 2% for 7 consecutive days
 
-**Why this matters:**
-This is the core product value. Everything before this (forecasting, data pipelines) is infrastructure. This phase connects the infrastructure into the actual decision engine that tells a consumer: "charge your battery at 2am when IEX is ₹3.2/kWh, discharge at 7pm when grid is ₹7.8/kWh, save ₹X today."
+**Implementation:**
+- [ ] `VoltageSOCCorrector` class with `calibrate(voltage, bms_soc, actual_soc)` and `correct(voltage, bms_soc)`
+- [ ] `detect_known_state_periods(soc_series, current_series)` — find full-charge (SOC>98%, I≈0), full-discharge (SOC<5%, I≈0), rest (I≈0 for >30min) periods
+- [ ] `build_correction_model(voltage, soc_error)` — linear/polynomial regression
+- [ ] `check_calibration_drift(recent_residuals, threshold=0.02)` — trigger re-calibration
+- [ ] `apply_correction(voltage_series, bms_soc_series)` → corrected_soc_series
 
-**Acceptance criteria:**
-- [ ] End-to-end pipeline: raw data → features → forecasts → dispatch → savings report
-- [ ] Dispatch runs for all 6 consumers across a full month
-- [ ] Three strategies compared: solar_surplus, full_solar, cheap_grid
-- [ ] Monthly savings report with breakdown: solar direct use, BESS arbitrage, demand charge reduction
-- [ ] Fix known bug: efficiency loss calculation in optimizer.py (sqrt vs linear)
-- [ ] Fix known gap: iex_arbitrage_savings currently hardcoded to 0 in economics.py
+**Location:** `src/edgegrid_forecast/data/quality.py` (new class)
 
-### Task Breakdown
+### M1-F4: Demand Signal Noise Filter ⬚
 
-**2.1 — Fix dispatch optimizer bugs** ⬚
-- Bug 1: `optimizer.py` line ~193 applies `np.sqrt(efficiency)` for charge/discharge loss. Should be:
-  - Charge: `energy_stored = energy_input × √η` (one-way efficiency)
-  - Discharge: `energy_delivered = energy_stored × √η` (one-way efficiency)
-  - Round-trip: `delivered = input × η` — verify this is what the current code achieves
-  - If `efficiency=0.88`, one-way = `√0.88 = 0.938`. Current code may be correct but needs explicit documentation
-- Bug 2: `economics.py` line ~198: `iex_arbitrage_savings_inr` is hardcoded to 0
-  - Calculate: `Σ (grid_price - iex_landed_price) × iex_purchase_kwh` for hours where IEX is cheaper
-  - This is the core BESS value proposition — it MUST work
+**Problem:** CT (current transformer) metering at Indian substations produces artefacts from 2-4 Hz grid frequency swings. These appear as sudden spikes in kVA readings that don't reflect real load changes. Additionally, high-impedance faults and capacitor switching on the 11kV feeder create transient distortions.
 
-**2.2 — Build forecast-to-dispatch bridge** ⬚
-- Create `src/edgegrid_forecast/pipeline/run_dispatch.py`
-- Input: consumer_id, date_range, bess_config
-- Steps:
-  1. Load or generate demand forecast (LightGBM or Chronos)
-  2. Generate solar forecast (Phase 1 output)
-  3. Get IEX prices for period (CSV or synthetic)
-  4. Run dispatch optimizer for each day
-  5. Compute economics for each day
-  6. Aggregate into monthly/annual summary
-- Output: DataFrame with daily dispatch schedules + cumulative savings
+**Detection logic (from PRD):**
+1. Rolling median filter on 15-min kVA readings (window = 5 intervals = 75 min)
+2. Compute deviation: `|kVA_actual - kVA_rolling_median| / kVA_rolling_median`
+3. Flag if deviation > 3σ from 48h rolling baseline AND frequency outside 49.5-50.5 Hz band
+4. Secondary check: if flagged interval's kW is stable (deviation < 1σ) but kVA spikes → likely PF artefact, not real load
 
-**2.3 — Run full-month simulation for all consumers** ⬚
-- Simulate April 2025 for all 6 consumers
-- BESS config: 500 kWh / 4h duration (standard C&I configuration)
-- Compare 3 charging strategies side by side
-- Expected output per consumer per month:
-  - Total consumption (kWh), peak demand (kW)
-  - Solar generation and direct use (kWh)
-  - BESS cycles, charge/discharge volumes
-  - Grid purchase (kWh), IEX purchase (kWh)
-  - Total bill without BESS, total bill with BESS, ₹ savings
-  - Demand charge savings from peak shaving
+**Implementation:**
+- [ ] `DemandNoiseFilter` class with configurable thresholds
+- [ ] `compute_rolling_baseline(kva_series, window="48h")` → rolling median + rolling σ
+- [ ] `detect_ct_artefacts(kva, kw, frequency, sigma_threshold=3.0)` → boolean mask
+- [ ] `detect_pf_artefacts(kva, kw, pf)` → kVA spike with stable kW = PF transient
+- [ ] `clean_demand_signal(kva, kw, frequency, pf)` → cleaned kVA with artefacts replaced by rolling median
 
-**2.4 — Generate savings report** ⬚
-- Produce a structured summary: consumer × month × strategy → savings
-- Compute: simple payback period, annual savings %, demand charge reduction %
-- Identify: which strategy wins for which consumer type (manufacturing vs commercial vs IT)
-- This becomes the core data asset for sales conversations
+**Location:** `src/edgegrid_forecast/data/quality.py` (new class)
 
-**2.5 — Write integration tests** ⬚
-- Test: full pipeline from synthetic data → forecast → dispatch → economics
-- Test: edge cases — zero solar day, IEX spike day, weekend vs weekday
-- Test: BESS SoC never violates bounds across multi-day simulation
-- Test: savings are always non-negative (dispatch should never be worse than no-BESS)
+### M1-F5: DG Transition Detection ⬚
 
----
+**Problem:** Many C&I consumers have diesel generators (DG) as backup. When grid power fails, the site switches to DG — grid import drops to near-zero but site load continues. DG periods must be detected and excluded from load forecasting baselines because they represent supply-side events, not demand-side behavior. If left in training data, the model learns that "demand drops to zero sometimes" and produces biased forecasts.
 
-## Phase 3 — Real Data Validation ⬚
+**Detection logic (from PRD):**
+1. Primary signal: grid import drops to <5% of rolling baseline within 1 interval (15 min)
+2. Confirmation: site load (if available from separate meter) remains >50% of baseline
+3. Secondary signal: voltage signature change — DG voltage is typically more variable (±5%) and at slightly different frequency
+4. Transition detection: flag the interval where grid→DG or DG→grid switchover happens
+5. Duration: all intervals from grid→DG to DG→grid are marked as DG period
+6. Use: exclude DG periods from demand training data, DR baseline computation
 
-**Outcome:** Validate the entire pipeline against real APEPDCL meter data for at least one consumer, proving that forecasts and savings estimates are grounded in reality, not just synthetic patterns.
+**Implementation:**
+- [ ] `DGTransitionDetector` class
+- [ ] `detect_grid_to_dg(grid_import, rolling_baseline, threshold_pct=5.0)` → boolean mask of DG-on periods
+- [ ] `detect_dg_to_grid(grid_import, rolling_baseline)` → transition-back points
+- [ ] `detect_voltage_signature(voltage_series, frequency_series)` → secondary DG confirmation
+- [ ] `mark_dg_periods(grid_import, voltage, frequency)` → full DG period mask with transition labels
+- [ ] `exclude_dg_from_training(demand_df, dg_mask)` → filtered DataFrame safe for model training
 
-**Why this matters:**
-Everything we've built so far runs on synthetic data. Synthetic data has deterministic weather→demand relationships (because we engineered them). Real meter data has noise, missing readings, anomalies, behavioral patterns, and the messy nonlinearity that makes weather features actually useful. Until we validate on real data, the model metrics are interesting but not trustworthy for customer-facing claims.
+**Location:** `src/edgegrid_forecast/data/quality.py` (new class)
 
-**Acceptance criteria:**
-- [ ] At least 3 months of hourly meter data for at least 1 consumer loaded and cleaned
-- [ ] Data quality pipeline handles real-world issues: gaps, frozen readings, outliers
-- [ ] Weather features show measurable MAPE improvement on real data (expect 15-25% relative)
-- [ ] Backtest: simulate BESS dispatch on historical data, compare to actual billing
-- [ ] ₹ savings estimate validated within ±20% of actual billing comparison
+### M1-F6: APFC Switching Event Detection ⬚
 
-### Task Breakdown
+**Problem:** Automatic Power Factor Correction (APFC) panels switch capacitor banks on/off to maintain PF near 0.95-1.0. Each switching event causes a step change in kVAR (and therefore kVA) without changing real power (kW). If APFC events are included in DR baselines, they can be mistaken for demand curtailment — the kVA drops sharply when capacitors switch in, making it look like the consumer reduced load.
 
-**3.1 — Obtain real meter data** ⛔ (Praveen action item)
-- Need: hourly kWh readings for any APEPDCL HT consumer
-- Minimum: 3 months (2,160 hours) — enough for train + validate
-- Ideal: 12 months (8,760 hours) — captures seasonal patterns
-- Format: Excel/CSV with timestamp + demand columns
-- Source: APEPDCL MDAS portal, consumer billing system, or manual meter reads
-- Fallback: even daily readings can be disaggregated using load profile templates
+**Detection logic (from PRD):**
+1. Step change: kVA drops/rises >50 kVA (for HT consumers) within 1 interval
+2. Stable kW: kW change in same interval is <1σ of rolling baseline
+3. PF jump: power factor jumps toward 0.95-1.0 (cap switch-in) or drops away (switch-out)
+4. Coincidence: all three conditions must occur simultaneously
+5. Characteristic: APFC events are discrete (step function), not gradual
 
-**3.2 — Run data quality pipeline** ⬚
-- Apply `data/quality.py` detectors to real data:
-  - Frozen readings (consecutive identical values)
-  - Z-score outliers (|z| > 3)
-  - IQR outliers (beyond 1.5× IQR)
-  - Isolation forest anomalies (multivariate)
-- Impute missing values: linear interpolation for gaps < 6h, similar-day fill for longer
-- Document: % of data imputed, % flagged as anomalous
-- Strengthen quality.py with any new patterns found in real data
+**Implementation:**
+- [ ] `APFCSwitchingDetector` class
+- [ ] `detect_kva_step(kva_series, threshold_kva=50)` → intervals with sudden kVA change
+- [ ] `detect_stable_kw(kw_series, kva_step_mask, sigma_threshold=1.0)` → confirm kW is stable during kVA step
+- [ ] `detect_pf_jump(pf_series, kva_step_mask, target_pf_range=(0.95, 1.0))` → PF moved toward target
+- [ ] `classify_apfc_events(kva, kw, pf)` → labeled events: cap_switch_in, cap_switch_out
+- [ ] `normalize_for_dr_baseline(kva, kw, apfc_events)` → kVA adjusted to remove APFC effects
 
-**3.3 — Retrain models on real data** ⬚
-- Train LightGBM with real demand data merged with weather
-- Compare: baseline (no weather) vs enriched (with weather)
-- Hypothesis: weather features should reduce MAPE by 15-25% on real data
-- Compare: Chronos zero-shot vs trained LightGBM — quantify cold-start gap
-- Run expanding window CV — report per-fold stability
+**Location:** `src/edgegrid_forecast/data/quality.py` (new class)
 
-**3.4 — Backtest dispatch economics** ⬚
-- Take real historical demand + actual IEX prices (from CSV export)
-- Run dispatch optimizer as if BESS was installed
-- Calculate: what would the consumer have saved each month?
-- Compare: simulated bill vs actual bill from APEPDCL
-- This produces the key claim: "Consumer X would have saved ₹Y lakhs/year with BESS"
+### M1 Integration: Enhanced Quality Pipeline ⬚
 
-**3.5 — Calibrate uncertainty bounds** ⬚
-- Current bounds: naive ±15% of point forecast (demand.py line 170)
-- Replace with: conformal prediction or quantile regression on real residuals
-- Target: 80% prediction interval coverage (P10-P90 should contain 80% of actuals)
-- This directly feeds BESS sizing — wider bounds = larger battery needed for reliability
+- [ ] Upgrade `run_quality_pipeline()` to orchestrate all M1 detectors
+- [ ] Add per-interval quality score: `quality_score = f(completeness, timeliness, anomaly_flags)`
+- [ ] Add per-consumer quality report: % intervals with each flag type
+- [ ] Support 15-min resolution (current pipeline assumes hourly)
+- [ ] Output: cleaned DataFrame with all detection columns + summary quality metrics
 
 ---
 
-## Phase 4 — Production Pipeline ⬚
+## M2 — Forecasting Engine 🔧 (partially complete)
 
-**Outcome:** A running system that automatically fetches fresh weather forecasts, generates demand/solar/price predictions, and recommends daily BESS dispatch schedules for each consumer.
+**PRD reference:** Module M2, Features M2-F1 through M2-F4
+**Status:** ~70% complete from Phase 0. Demand forecasting works well. Solar and price forecasting infrastructure exists but needs validation against real data.
 
-**Why this matters:**
-Phases 1-3 are offline/batch analysis. Phase 4 makes it operational. A BESS operator needs tomorrow's dispatch schedule by 6pm today — that requires automated data collection, inference, and delivery.
+**Phase 1 acceptance criteria (from PRD):**
+- [ ] Demand MAPE <12% on real consumer data (24h ahead)
+- [ ] Solar forecast available for dispatch (physics + ML hybrid)
+- [ ] IEX price pattern forecast for day-ahead dispatch
+- [ ] 15-minute resolution for all forecasts (currently hourly)
 
-**Acceptance criteria:**
-- [ ] Daily automated pipeline: weather pull → forecast → dispatch → recommendation
-- [ ] Runs on schedule (cron or equivalent) without manual intervention
-- [ ] Handles failures gracefully: API timeout → use last good forecast, model error → fallback to Chronos
-- [ ] Dispatch recommendation delivered as structured output (JSON or dashboard)
-- [ ] Latency: end-to-end pipeline completes in < 5 minutes for all 6 consumers
+### M2-F1: Demand Forecasting ✅ (synthetic) / ⬚ (real data)
 
-### Task Breakdown
+**Complete:**
+- [x] LightGBM with 112 features, 8 families → 2.27% val MAPE
+- [x] Chronos-Bolt zero-shot → 8.9% avg MAPE (cold-start fallback)
+- [x] Prophet + ensemble with inverse-MAPE weighting
+- [x] Expanding window CV with min_train_size=4000 → 7.14% MAPE
 
-**4.1 — Build daily pipeline orchestrator** ⬚
-- Create `src/edgegrid_forecast/pipeline/daily_run.py`
-- Steps:
-  1. Pull 7-day weather forecast from Open-Meteo forecast API (already coded, not tested)
-  2. Generate demand forecast (48h ahead) for each consumer
-  3. Generate solar forecast (48h ahead) for each location
-  4. Get IEX prices (today's actual + tomorrow's estimate from pattern)
-  5. Run dispatch optimizer for next 24-48 hours
-  6. Compute expected savings
-  7. Output recommendation as JSON + optional email/Slack alert
-- Error handling: each step has try/except with fallback strategy
+**Remaining:**
+- [ ] Validate on real APEPDCL meter data (⛔ blocked on data acquisition)
+- [ ] Retrain at 15-min resolution (96 intervals/day vs 24)
+- [ ] Add month-to-date peak tracking feature for demand charge optimization
+- [ ] Conformal prediction for calibrated uncertainty bounds
 
-**4.2 — Implement model versioning** ⬚
-- Track: which model version produced which forecast
-- Store: model artifact + training metadata + performance metrics alongside predictions
-- Enable: A/B testing between model versions
-- Use joblib serialization (already in demand.py save/load)
+### M2-F2: Solar Generation Forecasting ⬚
 
-**4.3 — Add forecast monitoring** ⬚
-- Log: forecast vs actual comparison (once actuals become available)
-- Track: MAPE drift over time — alert if model accuracy degrades
-- Implement: simple rolling MAPE tracker stored in a CSV or SQLite
-- This is critical for maintaining trust in the system
+- [ ] Validate physics layer (solar.py) against pvlib for Visakhapatnam
+- [ ] Build panel output converter: GHI → AC kW with temperature derating + soiling
+- [ ] Train ML correction layer on weather features
+- [ ] Create hybrid pipeline: physics × ml_correction_ratio
+- [ ] Integrate with dispatch optimizer's solar_kwh input
+- [ ] Target: <15% MAPE (24h ahead, industry standard for Indian locations)
 
-**4.4 — Expand API for production use** ⬚
-- Add endpoints:
-  - `GET /dispatch/recommendation/{consumer_id}` — today's recommended schedule
-  - `GET /dispatch/history/{consumer_id}` — past dispatch results
-  - `GET /metrics/forecast-accuracy/{consumer_id}` — rolling accuracy
-  - `POST /data/upload-meter-reading` — accept new meter data
-- Add authentication (API key or JWT)
-- Add rate limiting
-- Deploy: containerize with Docker, deploy to cloud (AWS/GCP/Azure)
+### M2-F3: IEX Price Forecasting ⬚
 
-**4.5 — Write operational runbook** ⬚
-- Document: how to start/stop the pipeline
-- Document: how to retrain models when new data arrives
-- Document: how to add a new consumer
-- Document: how to troubleshoot common failures (API timeout, model load error, bad data)
+- [ ] Pattern-based day-ahead: weekday/weekend × month × hour from FY24-25 matrix
+- [ ] ML enhancement: weather → price correlation (hot day → high demand → high price)
+- [ ] Build 15-min block price forecast (IEX settles at 15-min, not hourly)
+- [ ] Automated IEX DAM price collection (scraper or API when available)
+
+### M2-F4: Ensemble & Model Selection ⬚
+
+- [ ] Automated model selection per consumer: LightGBM vs Chronos vs Prophet
+- [ ] Ensemble weighting: inverse-MAPE or stacking
+- [ ] TimesFM 2.5 / MOIRAI-2 integration for model diversity
+- [ ] Forecast monitoring: track MAPE drift, alert on degradation
 
 ---
 
-## Phase 5 — Portfolio Optimization & Dashboard ⬚
+## M3 — Optimization Engine ⬚
 
-**Outcome:** Multi-consumer portfolio dispatch that optimizes across all 6 consumers simultaneously (shared solar, coordinated battery dispatch), with a live dashboard for EdgeGrid operations and customer-facing reports.
+**PRD reference:** Module M3, Features M3-F1 through M3-F4
+**Status:** ~40% complete. Current greedy dispatch works but PRD specifies MPC with multi-objective optimization. Major upgrade needed.
 
-**Why this matters:**
-Individual consumer optimization leaves money on the table. When Consumer A has excess solar at 11am and Consumer B peaks at 11am, coordinated dispatch can shift energy between them (via virtual net metering or shared BESS) for greater total savings. This is EdgeGrid's competitive moat — no single-consumer tool does this.
+**Phase 1 acceptance criteria (from PRD):**
+- [ ] Dispatch produces 15-min charge/discharge schedule for next 24h
+- [ ] Demand charge saving estimate within ±5% of actual billing
+- [ ] Month-to-date peak tracking prevents unnecessary battery cycles
+- [ ] Objective: maximize [arbitrage + demand charge savings + DISCOM peak shaving] − [degradation cost + SOC buffer penalty]
 
-**Acceptance criteria:**
-- [ ] Portfolio optimizer dispatches across all consumers in a cluster
-- [ ] Virtual net metering economics computed (prosumer credits)
-- [ ] Dashboard shows: real-time forecasts, dispatch schedule, cumulative savings
-- [ ] Customer-facing report: monthly savings statement per consumer
-- [ ] Cluster-level metrics: total savings, peak demand reduction, solar utilization %
+### M3-F1: MPC Controller ⬚ (major upgrade from greedy)
 
-### Task Breakdown
+- [ ] 48h horizon, 15-min timestep, re-solve every 30 min
+- [ ] Multi-objective: arbitrage + demand charge savings + peak shaving − degradation − SOC penalty
+- [ ] Constraints: SOC bounds (10-90%), max C-rate, grid import limits
+- [ ] kVA-based demand charges (not kW — Indian billing uses apparent power)
+- [ ] Month-to-date peak tracking: only dispatch when projected kVA will exceed billing period max
+- [ ] Replace current scipy/greedy approach with PuLP or CVXPY formulation
 
-**5.1 — Multi-consumer dispatch optimizer** ⬚
-- Extend `dispatch/optimizer.py` to accept multiple consumers
-- Shared constraints: single grid connection, shared solar plant, shared BESS
-- Optimization: minimize total portfolio cost (not individual)
-- `economics.py` already has `compute_network_value()` for prosumer credits — wire it in
+### M3-F2: BESS Degradation Model ⬚
 
-**5.2 — Build interactive dashboard** ⬚
-- Technology: React + Chart.js or Plotly Dash (TBD based on team skills)
-- Views:
-  - **Forecast view:** demand/solar/price predictions for next 48h with confidence bands
-  - **Dispatch view:** today's charge/discharge schedule with SoC timeline
-  - **Savings view:** cumulative ₹ saved, monthly trend, strategy comparison
-  - **Portfolio view:** all consumers on one screen, cluster-level metrics
-- Data source: FastAPI endpoints from Phase 4
+- [ ] Cycle-based: degradation = f(DOD, C-rate, temperature, cycle_count)
+- [ ] Calendar aging: capacity loss per year at rest
+- [ ] Economic dispatch must include degradation cost per cycle
+- [ ] Rainflow cycle counting for irregular dispatch patterns
 
-**5.3 — Generate customer-facing reports** ⬚
-- Monthly PDF/Excel report per consumer:
-  - Consumption summary (kWh, peak kW, load factor)
-  - Solar generation and utilization
-  - BESS operation (cycles, SoC profile, peak shaving)
-  - Savings breakdown (energy, demand charge, IEX arbitrage)
-  - Comparison: with BESS vs without BESS
-  - CO2 avoided
-- Automated generation from dispatch history data
+### M3-F3: BESS Sizing Engine ⬚ (upgrade from current)
 
-**5.4 — BESS sizing recommendation engine** ⬚
-- `optimizer.py` already has `optimize_bess_size()` — but it uses synthetic data
-- Feed real dispatch results to refine sizing recommendations
-- Output: "For Consumer X, the optimal BESS is Y kWh / Z hours at ₹A capex with B% IRR"
-- This is the sales tool: show prospects their specific ROI before signing
+**Current:** `optimize_bess_size()` exists but uses synthetic data and simplified economics
+- [ ] Parametric sweep: capacity (0.5-20 MWh) × duration (2/4/6h) × strategy
+- [ ] Economics: NPV, IRR, payback with real CAPEX curves (₹150L/MWh declining annually)
+- [ ] Sensitivity: to IEX price volatility, demand growth, tariff changes
+- [ ] Output per configuration: annual savings, IRR, payback, optimal strategy
+
+### M3-F4: Real-Time Recalculation ⬚
+
+- [ ] Re-optimize when actuals deviate >10% from forecast
+- [ ] Handle contingencies: sudden cloud cover, grid outage, DG activation
+- [ ] Fallback: if optimizer fails, execute conservative default schedule
 
 ---
 
-## Phase 6 — Advanced Models & Scale ⬚
+## M4 — BESS Execution Layer ⬚
 
-**Outcome:** Best-in-class forecast accuracy through foundation model ensembles, probabilistic forecasting, and 15-minute resolution matching IEX settlement periods.
+**PRD reference:** Module M4
+**Depends on:** M1 (clean data), M2 (forecasts), M3 (optimal schedule)
 
-**Why this matters:**
-Phase 1-5 gets us to a working product. Phase 6 makes it best-in-class. The difference between 10% MAPE and 5% MAPE at scale = millions of rupees in more accurate dispatch. 15-minute resolution matters because IEX DAM settles at 15-min blocks — hourly forecasts leave intra-hour arbitrage on the table.
-
-### Task Breakdown
-
-**6.1 — TimesFM 2.5 (Google) integration** ⬚
-- Alternative foundation model, different architecture than Chronos
-- Ensemble: Chronos + TimesFM for more robust zero-shot forecasts
-- Expected: 1-2pp MAPE improvement from model diversity
-
-**6.2 — MOIRAI-2 (Salesforce) integration** ⬚
-- Probabilistic foundation model — native uncertainty quantification
-- Use for: calibrated prediction intervals (replace naive ±15% bounds)
-
-**6.3 — Conformal prediction framework** ⬚
-- Model-agnostic uncertainty quantification
-- Guarantee: if you say "80% prediction interval", it actually covers 80% of outcomes
-- Applies to: demand, solar, and price forecasts
-- Impact: BESS sizing becomes statistically grounded
-
-**6.4 — 15-minute resolution upgrade** ⬚
-- IEX settles at 15-min blocks; hourly forecasts miss intra-hour price spikes
-- Interpolate weather data from hourly → 15-min (linear or spline)
-- Retrain demand model at 15-min granularity
-- Modify dispatch optimizer for 96-slot (vs 24-slot) days
-- Expected impact: 5-10% better IEX arbitrage capture
-
-**6.5 — Automated IEX price collection** ⬚
-- Build Playwright/Selenium scraper for IEX DAM Market Snapshot
-- Schedule: daily pull of yesterday's 96 time blocks
-- Store: append to growing historical price database
-- Fallback: synthetic prices from FY matrix if scraper fails
+- [ ] Convert M3 schedule → BMS commands (charge/discharge/idle per interval)
+- [ ] Safety checks: SOC bounds, temperature limits, max C-rate enforcement
+- [ ] Grid code compliance: ramp rate limits per CERC/SERC regulations
+- [ ] Telemetry ingestion: real-time SOC, voltage, current, temperature from BMS
+- [ ] Closed-loop: actual SOC → correction signal back to M3
 
 ---
 
-## Dependencies & Critical Path
+## M5 — Demand Response Engine ⬚
 
-```
-Phase 0 (Foundation) ✅
-    │
-    ├── Phase 1 (Solar Model) ──────┐
-    │                               │
-    │                               ▼
-    │                    Phase 2 (Dispatch Loop)
-    │                               │
-    │                               │
-    ▼                               ▼
-Phase 3 (Real Data) ◄──────── Phase 2 output validates
-    │                          against real billing
-    │
-    ▼
-Phase 4 (Production Pipeline)
-    │
-    ▼
-Phase 5 (Portfolio + Dashboard)
-    │
-    ▼
-Phase 6 (Advanced Models)
-```
+**PRD reference:** Module M5
+**Depends on:** M1 (clean data + DG/APFC exclusion), M2 (demand forecast)
 
-**Critical path:** Phase 1 → Phase 2 → Phase 3 → Phase 4
-**Parallel track:** Phase 3 (real data) can start anytime — it's a data acquisition task, not code-dependent
-**Phase 6** items can be pulled forward into any phase if time allows (e.g., conformal prediction could go into Phase 2)
+### M5-F1: Adjusted Historical Baseline
+
+- [ ] 10 most recent non-curtailment, non-DG, non-holiday business days
+- [ ] Morning adjustment factor (ratio of today's first 4h to baseline's first 4h)
+- [ ] DG period exclusion (from M1-F5)
+- [ ] APFC normalization (from M1-F6)
+- [ ] High-variance interval detection and exclusion
+
+### M5-F2: Curtailment Verification
+
+- [ ] Compare actual kVA during DR event vs adjusted baseline
+- [ ] Minimum sustained duration check (typically 15 min per DISCOM requirement)
+- [ ] Prevent overclaiming from coincidental APFC events
+
+### M5-F3: DR Event Economics
+
+- [ ] Incentive calculation per DISCOM program rules
+- [ ] Penalty for non-performance
+- [ ] Integration with BESS dispatch (pre-charge battery before DR event)
 
 ---
 
-## Known Bugs & Tech Debt (Fix During Relevant Phase)
+## M6 — Explainability & Audit Layer ⬚
+
+**PRD reference:** Module M6
+**Phase 1 target:** 100% dispatch explanations (every charge/discharge decision has a reason)
+
+- [ ] SHAP values for demand forecast features (which features drove this forecast?)
+- [ ] Dispatch decision audit: for each interval, log why charge/discharge/idle was chosen
+- [ ] Natural language explanations: "Charging at 02:00 because IEX price is ₹2.8/kWh (₹4.1 below grid tariff)"
+- [ ] Monthly savings attribution: break savings into solar direct use, arbitrage, demand charge, DR
+- [ ] Anomaly explanations: when quality pipeline flags data, explain what was detected and how it was handled
+- [ ] Regulatory compliance: generate audit-ready reports showing dispatch decisions + data quality
+
+---
+
+## Known Bugs & Tech Debt
 
 | # | Issue | Location | Fix In | Severity |
 |---|-------|----------|--------|----------|
-| BUG-1 | Efficiency loss as `np.sqrt(η)` — needs documentation or fix | `optimizer.py` ~L193 | Phase 2 | Medium |
-| BUG-2 | `iex_arbitrage_savings_inr` hardcoded to 0 | `economics.py` ~L198 | Phase 2 | High |
-| BUG-3 | Prophet holidays list uses circular import workaround | `demand.py` L386-390 | Phase 2 | Low |
-| BUG-4 | `scipy.optimize` imported but unused in optimizer | `optimizer.py` imports | Phase 2 | Low |
-| DEBT-1 | Solar blend ratio hardcoded 40/60 | `solar.py` L205 | Phase 1 | Medium |
-| DEBT-2 | API lag features filled with NaN for missing history | `api/main.py` ~L203 | Phase 4 | Medium |
-| DEBT-3 | No tests for economics, foundation, loaders, quality | `tests/` | Phase 2-3 | Medium |
-| DEBT-4 | Network charges not parametrized per consumer | `constants.py` | Phase 5 | Low |
-| DEBT-5 | IRR calculation uses simplified fallback | `optimizer.py` L352 | Phase 2 | Medium |
+| BUG-1 | Efficiency loss as `np.sqrt(η)` — needs audit | `optimizer.py` ~L193 | M3 | Medium |
+| BUG-2 | `iex_arbitrage_savings_inr` hardcoded to 0 | `economics.py` ~L198 | M3 | **High** |
+| BUG-3 | Prophet holidays circular import workaround | `demand.py` L386-390 | M2 | Low |
+| BUG-4 | `scipy.optimize` imported unused | `optimizer.py` imports | M3 | Low |
+| DEBT-1 | Solar blend ratio hardcoded 40/60 | `solar.py` L205 | M2-F2 | Medium |
+| DEBT-2 | API lag features NaN for missing history | `api/main.py` ~L203 | M4 | Medium |
+| DEBT-3 | No tests for economics, foundation, loaders, quality | `tests/` | M1-M3 | Medium |
+| DEBT-4 | Network charges not parametrized per consumer | `constants.py` | M3-F3 | Low |
+| DEBT-5 | IRR calculation uses simplified fallback | `optimizer.py` L352 | M3-F3 | Medium |
+| DEBT-6 | Hourly resolution throughout — PRD requires 15-min | All modules | M1-M3 | **High** |
+| DEBT-7 | kW-based demand charges — India uses kVA | `economics.py` | M3-F1 | **High** |
 
 ---
 
-## Metrics That Matter (Track Across Phases)
+## Metrics That Matter
 
-| Metric | Current (Phase 0) | Target (Phase 3) | Target (Phase 5) | Why |
-|--------|-------------------|-------------------|-------------------|-----|
-| Demand MAPE (1-step) | 2.27% (synthetic) | <5% (real data) | <3% (real data) | Drives dispatch accuracy |
-| Demand MAPE (24h-ahead) | 9.53% (synthetic) | <12% (real data) | <8% (real data) | Production scenario |
-| Solar MAPE | Not measured | <15% | <10% | Solar input to dispatch |
-| Chronos zero-shot MAPE | 8.9% (synthetic) | <12% (real data) | <10% (real data) | Cold-start fallback |
-| Dispatch savings (₹/month/consumer) | Not measured | Measured on real data | Validated against billing | The product KPI |
-| P10-P90 coverage | 83.9% (Chronos) | >80% (all models) | >85% (all models) | Trust in uncertainty bounds |
-| Pipeline latency | N/A | N/A | <5 min for 6 consumers | Operational requirement |
-| Data quality (% clean) | 100% (synthetic) | >95% (real data) | >98% (real data) | Garbage in, garbage out |
+| Metric | Current (Phase 0) | Target (Phase 1) | Target (Production) | Module |
+|--------|-------------------|-------------------|---------------------|--------|
+| Demand MAPE (24h-ahead) | 9.53% (synthetic) | <12% (real data) | <8% | M2 |
+| Chronos zero-shot MAPE | 8.9% (synthetic) | <12% (real data) | <10% | M2 |
+| Solar MAPE (24h-ahead) | Not measured | <15% | <10% | M2 |
+| SOC correction accuracy | N/A | ±2% of lab reference | ±1% | M1 |
+| Data quality score | 100% (synthetic) | >95% (real data) | >98% | M1 |
+| Demand charge saving accuracy | N/A | ±5% of actual billing | ±3% | M3 |
+| Dispatch savings (₹/month) | Not measured | Measured on real data | Validated | M3+M4 |
+| P10-P90 coverage | 83.9% (Chronos) | >80% | >85% | M2 |
+| Dispatch explanation coverage | 0% | 100% | 100% | M6 |
 
 ---
 
 ## Session Workflow
 
-Every session should follow this pattern:
-
-1. **Read** ROADMAP.md — find current phase and next unchecked task
+1. **Read** ROADMAP.md — find current module and next unchecked task
 2. **Read** PROGRESS.md — check latest metrics and known issues
 3. **Execute** — pick up the next task, write code, run tests
 4. **Validate** — verify the task meets acceptance criteria
@@ -456,4 +385,4 @@ Every session should follow this pattern:
 
 ---
 
-*This roadmap is a living document. Update it as we learn — the plan should evolve with the product.*
+*This roadmap mirrors the EIL PRD module architecture. Update it as we learn — the plan should evolve with the product.*
