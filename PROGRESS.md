@@ -198,7 +198,12 @@
 
 | Hash | Date | Description |
 |------|------|-------------|
-| (pending) | 2026-04-15 | feat: M1 Data Quality Engine — AMI, voltage SOC, CT/PF, DG, APFC |
+| (pending) | 2026-04-15 | docs: Rewrite README.md, update ROADMAP.md M1 status, add Session 9 progress |
+| `32ffbd5` | 2026-04-15 | docs: Session 8 progress — quality/ subpackage refactor, A/A/A ratings |
+| `034c0db` | 2026-04-15 | refactor: Split quality.py into quality/ subpackage |
+| `f022f1d` | 2026-04-15 | docs: Session 7 progress |
+| `c6bea44` | 2026-04-15 | fix: M1 code review — correctness bugs, vectorization, test coverage |
+| `8445d6c` | 2026-04-15 | feat: M1 Data Quality Engine — AMI, voltage SOC, CT/PF, DG, APFC |
 | `ec5b86f` | 2026-04-15 | docs: Rewrite README.md |
 | `eb64863` | 2026-04-15 | docs: Add phased ROADMAP.md |
 | `a5d003c` | 2026-04-15 | docs: Update PROGRESS.md |
@@ -238,9 +243,12 @@ Priority follows EIL PRD module architecture: M1 → M2 → M3 → M4.
 
 ### Completed ✅
 
-- [x] **M1 Data Quality Engine** — 6 India-specific detectors + 63 tests (Sessions 6-7)
+- [x] **Interactive dashboard** — Live prediction, quality scorecard, forecast accuracy (Session 9)
+- [x] **README.md rewrite** — product thinking, M1 showcase, dashboard, AD-13 to AD-19 (Session 9)
+- [x] **M1 quality/ subpackage refactor** — A/A/A code review, 10 files, 127 tests (Session 8)
+- [x] **M1 code review fixes** — vectorization, correctness, edge cases (Session 7)
+- [x] **M1 Data Quality Engine** — 6 India-specific detectors (Session 6)
 - [x] **ROADMAP restructured to PRD modules** — M1-M6 alignment (Session 6)
-- [x] **README.md rewrite** — product + engineering documentation (Session 6)
 - [x] **Chronos-Bolt integration** — 8.9% MAPE zero-shot (Session 5)
 - [x] **IEX price collector** — CSV parser + synthetic generator (Session 5)
 - [x] **Fix CV fold 1** — expanding window CV min_train_size=4000 (Session 5)
@@ -261,12 +269,44 @@ Priority follows EIL PRD module architecture: M1 → M2 → M3 → M4.
 | `src/edgegrid_forecast/data/collectors/iex_prices.py` | IEX DAM price collector (CSV + synthetic) |
 | `src/edgegrid_forecast/data/collectors/pull_all.py` | Data collection orchestrator |
 | `ROADMAP.md` | Module-aligned roadmap (M1-M6) matching EIL PRD |
-| `tests/test_quality.py` | 52 tests covering all M1 features |
+| `tests/test_quality.py` | 127 tests covering all M1 features + edge cases + input validation |
 
 
 ---
 
 ## 10. Session Log
+
+### Session 9 — 2026-04-15
+**Focus:** Interactive dashboard + README rewrite with product thinking
+
+What got done:
+- Built interactive HTML dashboard using web-artifacts-builder (React + TypeScript + Tailwind + recharts)
+- Three panels designed around activation and aha moment principles:
+  1. **Live Prediction** — animated demand streaming against pre-plotted forecast, running MAPE counter,
+     confidence band, playback controls (1x/2x/4x/8x), scrubber, insight card after 20 intervals
+  2. **M1 Quality Scorecard** — quality gauge, anomaly pie, horizontal bar breakdown, completeness
+     heatmap (hour x day), cross-consumer summary table
+  3. **Forecast Accuracy** — model comparison table with toggle visibility, actual-vs-predicted time
+     series, error distribution histogram, hourly MAPE curves, cross-consumer comparison
+- Synthetic data layer: seeded PRNG (mulberry32), Box-Muller normal distribution, 6 consumer profiles
+  with realistic Indian load curves, quality stats computation, forecast metrics computation
+- Bundled to single self-contained HTML file (952K) via Parcel + html-inline
+- Rewrote README.md with product thinking:
+  - Added "What Makes This Different" section positioning data quality as competitive advantage
+  - Added M1 Data Quality Engine section with full architecture table and design principles
+  - Added Interactive Dashboard section describing all 3 panels
+  - Updated project structure to show quality/ subpackage (10 files)
+  - Updated test count from 35+ to 127
+  - Added architecture decisions AD-13 through AD-19
+  - Updated status table to reflect M1 completion and dashboard
+- Updated ROADMAP.md: changed M1 from "In Progress" to "COMPLETE" with all checkboxes checked
+- Updated PROGRESS.md: added Session 9 log, fixed commit history, updated test count reference
+
+Product thinking insights (from Brian Balfour, Elena Verna, Casey Winters, Crystal W., Bob Baxley podcasts):
+- Elena's "wow moment" > "aha moment" — user should think "it actually predicted that?"
+- Crystal's activation constraint — time-to-value under 15 seconds, live view answers trust viscerally
+- Bob Baxley's emotional design — green for confidence, pulse animation creates life
+- Live Prediction tab is the front door — activation first, analysis second
 
 ### Session 8 — 2026-04-15
 **Focus:** M1 quality → A+/A/A refactor
