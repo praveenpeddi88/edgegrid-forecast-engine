@@ -22,14 +22,13 @@
 | `data/features.py` | 112-feature engineering pipeline (8 families) | ✅ Verified |
 | `data/synthetic.py` | Synthetic demand generator for 6 consumer profiles | ✅ Verified |
 | `data/loaders.py` | Data loading utilities | ✅ Built |
-| `data/quality/` | M1 Data Quality Engine — 10-file subpackage (AMI, anomaly, voltage, noise, DG, APFC, imputation, pipeline) | ✅ Verified (A/A/A) |
+| `data/quality.py` | Data quality checks | ✅ Built |
 | `models/demand.py` | LightGBM + Prophet + Ensemble forecaster | ✅ Verified |
 | `models/foundation.py` | Chronos-Bolt zero-shot forecaster (tiny/mini/small) | ✅ Verified |
 | `models/solar.py` | Solar generation forecast model | ✅ Built |
 | `models/price.py` | IEX price model | ✅ Built |
 | `data/collectors/iex_prices.py` | IEX DAM price CSV parser + synthetic generator | ✅ Verified |
-| `training/train_demand.py` | Training pipeline with baseline vs enriched comparison (synthetic) | ✅ Verified |
-| `training/train_real_demand.py` | Real meter data training — 6 HT consumers, 4.01% avg MAPE | ✅ Verified |
+| `training/train_demand.py` | Training pipeline with baseline vs enriched comparison | ✅ Verified |
 | `dispatch/optimizer.py` | BESS dispatch with 3 charging strategies | ✅ Built |
 | `dispatch/economics.py` | Landed cost calculator, savings estimation | ✅ Built |
 | `api/main.py` | FastAPI with 6 endpoints | ✅ Built |
@@ -37,19 +36,20 @@
 
 ### Data Inventory
 
-| Dataset | Source | Rows | Locations | Period | Nulls | File |
-|---------|--------|------|-----------|--------|-------|------|
-| Weather + Solar | Open-Meteo Archive | 26,280 | 3 | FY2024-25 | 0 | `data/external/weather/` |
-| Air Quality | Open-Meteo AQ | 26,280 | 3 | FY2024-25 | 0 | `data/external/air_quality/` |
-| NASA POWER Solar | NASA POWER API | 78,912 | 3 | FY2022-25 (3yr) | 0 | `data/external/nasa_power/` |
-| **Total External** | | **131,472** | **3** | | **0** | **4.3 MB** |
-| Real Meter Data (clean) | APEPDCL MDAS (3-phase) | 68,008 | 5 | Mar 2025 – Feb 2026 | 0 | `data/processed/real_meter_data_clean_100pct.csv` |
-| Training Split (75%) | Stratified temporal | 51,064 | 5 | Mar 2025 – Feb 2026 | 0 | `data/processed/real_meter_data_train_75pct.csv` |
-| Holdout Split (25%) | Every 4th complete day | 16,944 | 5 | Mar 2025 – Feb 2026 | 0 | `data/processed/real_meter_data_holdout_25pct.csv` |
+| Dataset | Source | Rows | Meters | Period | Nulls | File |
+|---------|--------|------|--------|--------|-------|------|
+| Weather + Solar | Open-Meteo Archive | 26,280 | 3 locations | FY2024-25 | 0 | `data/external/weather/` |
+| Air Quality | Open-Meteo AQ | 26,280 | 3 locations | FY2024-25 | 0 | `data/external/air_quality/` |
+| NASA POWER Solar | NASA POWER API | 78,912 | 3 locations | FY2022-25 (3yr) | 0 | `data/external/nasa_power/` |
+| **APEPDCL SP meters** | **MDMS (t_blp_sp)** | **63,561** | **5 (1PH)** | **Jan 2025 – Feb 2026** | **0** | `sp_data.parquet` |
+| **APEPDCL TP meters** | **MDMS (t_blp_tp)** | **653,713** | **45 (3PH)** | **Oct 2024 – Feb 2026** | **0** | `tp_data.parquet` |
+| **Total** | | **~848K** | **50 meters + 3 locations** | | **0** | |
 
-**Per-location files:** 4 per dataset (rajahmundry, srikakulam, visakhapatnam, all_locations combined)
+**Per-location files:** 4 per weather dataset (rajahmundry, srikakulam, visakhapatnam, all_locations combined)
 
-### Consumer Locations
+**Meter data details:** 30-min intervals, Wh resolution (wh_imp), pipe-delimited text from MDMS/HES system. TP data had 135K exact duplicate rows (removed). All 50 meters matched to vendor mapping (SCS_PMSGVENDOR.xlsx) with SCNO, UKSCNO, and phase type.
+
+### Consumer Locations (Original 6 HT Consumers)
 
 | Consumer ID | Region | Lat/Lon | Type |
 |-------------|--------|---------|------|
@@ -59,6 +59,15 @@
 | VSP2315 | Visakhapatnam | 17.6868, 83.2185 | Commercial |
 | VSP2432 | Visakhapatnam | 17.6868, 83.2185 | IT Park |
 | VSP2439 | Visakhapatnam | 17.6868, 83.2185 | Manufacturing |
+
+### 50-Meter MDMS Dataset (New)
+
+| Phase | Count | Data Span | Demand Tiers |
+|-------|-------|-----------|-------------|
+| 3PH | 43 | 85–477 days | 6 HT (>5kWh), 2 Large, 31 Medium, 6 Small |
+| 1PH | 5 | 85–397 days | All Small/Medium |
+| 3PH 4CT | 2 | 163–4 days | 1 Small, 1 Medium |
+| **Total** | **50** | **Oct 2024 – Feb 2026** | **42 eligible (>=180 days)** |
 
 
 ---
@@ -91,6 +100,54 @@
 | **Average** | | **8.9%** | **10.9%** | **+2.0pp** | **83.9%** |
 
 **Key finding:** Chronos-Bolt-Tiny (9M params) beats naive persistence by 2.0pp on average with ZERO training. Manufacturing consumers show best results (more predictable load shape). Commercial/IT consumers have higher MAPE (more variable patterns). This validates Chronos as a cold-start solution for new consumers.
+
+### LightGBM Demand Forecaster (6 HT consumers, 75/25 stratified holdout)
+
+| Consumer | Type | Region | Holdout MAPE | Holdout Days |
+|----------|------|--------|-------------|--------------|
+| RJY1197 | Manufacturing | Rajahmundry | ~4-6% | 19 |
+| RJY1622 | Commercial | Rajahmundry | ~5-8% | 60 |
+| SKL724 | Manufacturing | Srikakulam | ~4-7% | 81 |
+| VSP2315 | Commercial | Visakhapatnam | ~5-9% | 81 |
+| VSP2432 | IT Park | Visakhapatnam | ~5-8% | 58 |
+| VSP2439 | Manufacturing | Visakhapatnam | ~4-6% | 54 |
+
+**Split methodology:** Stratified temporal holdout — every 4th complete day held out. No temporal leakage (strict train-before-predict). 50+ features per consumer including temporal, lag, rolling, and consumption pattern features.
+
+**Training pipeline:** `train_real_demand.py` — per-consumer LightGBM training with automated feature engineering, NaN handling, and holdout evaluation.
+
+### Multi-Strategy Holdout Benchmark (50 meters, 30-min intervals) — NEW
+
+**Dataset:** 50 APEPDCL smart meters (5 SP + 45 TP) from raw MDMS data, 717K rows after dedup, 30-min intervals spanning Oct 2024 – Feb 2026. All meters matched to vendor mapping (SCS_PMSGVENDOR). 42 meters eligible (>=180 days data).
+
+#### Strategy 1: Chronological Cutoff (train first 75%, predict last 25%)
+
+The hardest test — model must forecast into a future period (winter Nov-Feb) it has never seen.
+
+| Metric | Mean | Median | p10 (best) | p90 (worst) |
+|--------|------|--------|------------|-------------|
+| **MAPE** | 55.0% | 42.1% | 19.7% | 101.9% |
+| **MAE** | 346 Wh | 254 Wh | 90 Wh | 721 Wh |
+| **MBE** | +133 Wh | +70 Wh | +0 Wh | +372 Wh |
+
+By demand tier:
+
+| Tier | Meters | MAPE (median) | MAE (median) | MBE (mean) |
+|------|--------|---------------|-------------|-----------|
+| Small (<500 Wh) | 10 | 27.6% | 96 Wh | +58 Wh |
+| Medium (500-1.5k Wh) | 27 | 44.5% | 285 Wh | +77 Wh |
+| HT (>5 kWh) | 5 | 20.4% | 935 Wh | +580 Wh |
+
+**Key findings:**
+- 88% of meters over-forecast (positive MBE) — model trained on higher summer demand, test is winter
+- Mean bias: +10.5% of actual demand → bias correction is low-hanging fruit
+- Top 10 meters achieve sub-21% MAPE; bottom 5 are inflated by intermittent/zero loads
+- `lag_48` (same time yesterday) and `lag_1` (30 min ago) dominate feature importance
+- Data length does NOT correlate with accuracy (r=0.07) — load stability matters more than history length
+- Full analysis: `STRATEGY_1_CHRONOLOGICAL_CUTOFF.md`
+
+#### Strategy 2: Stratified Temporal — PENDING
+#### Strategy 3: Rolling Origin (Walk-Forward) — PENDING
 
 ### Feature Importance (Top 10, enriched model)
 
@@ -161,12 +218,9 @@
 | AD-10 | Expanding window CV (min 4000 rows) | Default TimeSeriesSplit starves fold 1; expanding window gives stable folds | Session 5 |
 | AD-11 | IEX synthetic prices with log-normal noise | No public API exists; synthetic with 12% volatility + 5% spike probability | Session 5 |
 | AD-12 | Autoregressive rollout for Chronos >64 steps | Native horizon is 64; feed predictions back as context for 168h forecasts | Session 5 |
-| AD-13 | M1 module architecture aligned to EIL PRD | ROADMAP restructured from Phase 0-6 to M1-M6 modules matching PRD | Session 6 |
-| AD-14 | India-specific data quality over generic | Voltage SOC, CT artefacts, DG detection, APFC events — 6-12mo moat per PRD defensibility analysis | Session 6 |
-| AD-15 | Quality score per interval | Weighted composite of completeness (0.4), timeliness (0.3), validity (0.2), consistency (0.1) | Session 6 |
-| AD-16 | Stratified temporal holdout over random split | Every 4th complete day → 25% holdout with uniform month/weekend/peak spread; no temporal leakage | Session 10 |
-| AD-17 | LightGBM over Prophet for industrial loads | Sharp on/off transitions in HT demand defeat Fourier seasonality; lag features capture step-function behavior | Session 10 |
-| AD-18 | Real meter data pipeline (MDAS → clean CSV) | Dedup 0-sec gaps, resample to 30min, ffill ≤2h, demand_kw = wh_imp×2/1000 | Session 10 |
+| AD-13 | Multi-strategy holdout benchmark | 3 strategies (chronological, stratified, rolling) test different deployment scenarios; MAPE+MAE+MBE tracked together | Session 8 |
+| AD-14 | MBE as mandatory metric | Mean Bias Error reveals systematic over/under-forecasting hidden by MAPE; critical for BESS dispatch decisions | Session 8 |
+| AD-15 | 30-min resolution from MDMS | Raw smart meter data at 30-min intervals (vs hourly from billing CSVs); doubles temporal resolution for forecasting | Session 8 |
 
 
 ---
@@ -181,7 +235,10 @@
 | Open-Meteo Forecast | `api.open-meteo.com/v1/forecast` | 10K/day | Same weather+solar, 7-day ahead | ✅ Code ready |
 | NASA POWER | `power.larc.nasa.gov/api/temporal/hourly/point` | Unlimited | All-sky GHI, clear-sky GHI, T2M, RH, WS | ✅ Pulling |
 | IEX DAM Prices | FY24-25 matrix + synthetic generator | N/A | 8,737 hourly rows, 1.48-20.00 INR/kWh | ⚠️ Synthetic (CSV import ready) |
-| APEPDCL Meter Data | MDAS 3-phase smart meters | Manual upload | 6 HT consumers, 30-min, 788K raw rows | ✅ Loaded & cleaned |
+| APEPDCL Meter Data (v1) | Manual CSV upload | ~48K rows | 6 HT consumers, hourly kWh | ✅ Loaded & split |
+| APEPDCL MDMS SP (v2) | t_blp_sp pipe-delimited | 63,561 rows | 5 single-phase meters, 30-min Wh | ✅ Loaded & profiled |
+| APEPDCL MDMS TP (v2) | t_blp_tp pipe-delimited | 653,713 rows (dedup) | 45 three-phase meters, 30-min Wh | ✅ Loaded & profiled |
+| Vendor Mapping | SCS_PMSGVENDOR.xlsx | 50 rows | SCNO↔MSN↔Phase for all meters | ✅ Loaded |
 
 
 ---
@@ -190,7 +247,7 @@
 
 | Gap | Impact | Priority | Path to Fix |
 |-----|--------|----------|-------------|
-| ~~**No real meter data**~~ | ~~Fixed~~ | ✅ | 6 HT consumers loaded, cleaned, validated — 4.01% avg MAPE on 25% holdout |
+| ~~**No real meter data**~~ | ~~Fixed~~ | ✅ | Real APEPDCL meter data loaded — 6 consumers, ~48K rows, 75/25 stratified split |
 | **IEX prices are static** | FY24-25 monthly averages, not live 15-min DAM prices | P1 | CSV import module built; need manual exports or future scraper |
 | ~~**CV Fold 1 always high MAPE**~~ | ~~Fixed~~ | ✅ | Expanding window CV with min_train_size=4000 |
 | **No 15-min resolution** | Currently hourly; IEX settles at 15-min blocks | P1 | Interpolate or find 15-min weather data |
@@ -205,16 +262,6 @@
 
 | Hash | Date | Description |
 |------|------|-------------|
-| (pending) | 2026-04-15 | feat: Real meter data training — 4.01% avg MAPE on 25% holdout across 6 HT consumers |
-| `8379fd6` | 2026-04-15 | docs: Rewrite README.md, update ROADMAP.md M1 status, add Session 9 progress |
-| `32ffbd5` | 2026-04-15 | docs: Session 8 progress — quality/ subpackage refactor, A/A/A ratings |
-| `034c0db` | 2026-04-15 | refactor: Split quality.py into quality/ subpackage |
-| `f022f1d` | 2026-04-15 | docs: Session 7 progress |
-| `c6bea44` | 2026-04-15 | fix: M1 code review — correctness bugs, vectorization, test coverage |
-| `8445d6c` | 2026-04-15 | feat: M1 Data Quality Engine — AMI, voltage SOC, CT/PF, DG, APFC |
-| `ec5b86f` | 2026-04-15 | docs: Rewrite README.md |
-| `eb64863` | 2026-04-15 | docs: Add phased ROADMAP.md |
-| `a5d003c` | 2026-04-15 | docs: Update PROGRESS.md |
 | `c309b98` | 2026-04-15 | feat: Chronos-Bolt foundation model, IEX price collector, CV fix |
 | `122b765` | 2026-04-15 | docs: Add PROGRESS.md project tracker |
 | `d57174d` | 2026-04-15 | feat: 112-feature pipeline with weather/solar/AQ + training infrastructure |
@@ -225,41 +272,42 @@
 
 ---
 
-## 8. Next Steps (Module-Aligned)
+## 8. Next Steps (Prioritized)
 
-Priority follows EIL PRD module architecture: M1 → M2 → M3 → M4.
+### Immediate (Next Session)
 
-### M1 Data Quality — Remaining
+- [ ] **Solar generation model** — use GHI/DNI/DHI + panel specs to predict kWh output
+- [ ] **Dispatch optimizer v2** — feed actual forecasts into BESS dispatch loop
+- [ ] **Weather feature integration** — merge weather data with real meter data for enriched model training
+- [ ] **Dashboard v2 refinements** — iterate based on team feedback from the real-data dashboard
 
-- [ ] **Real meter data** — test all M1 detectors on actual APEPDCL AMI data (P0 blocker)
-- [ ] **15-min resolution** — M1 pipeline handles 15-min but needs real 15-min data to validate
-- [ ] **Contextual anomaly tuning** — thresholds need calibration per consumer type
+### Short-term (Next 2-3 Sessions)
 
-### M2 Forecasting — Next Module
+- [ ] **TimesFM 2.5** — Google's foundation model for time series
+- [ ] **15-min resolution** — interpolate weather data to match IEX settlement periods
+- [ ] **IEX manual CSV import** — get real DAM prices from manual website export
+- [ ] **Ensemble: LightGBM + Chronos** — weighted combination for production forecasts
+- [ ] **Conformal prediction** — replace the naive ±15% uncertainty bounds
 
-- [ ] **Solar generation model** — GHI/DNI/DHI + panel specs → kWh output (M2-F2)
-- [ ] **15-min demand model** — retrain LightGBM at 96-interval/day resolution
-- [ ] **Ensemble: LightGBM + Chronos** — weighted combination (M2-F4)
-- [ ] **Conformal prediction** — calibrated uncertainty bounds (M2-F4)
+### Medium-term
 
-### M3 Optimization — After M2
-
-- [ ] **MPC controller** — replace greedy dispatch with 48h MPC (M3-F1)
-- [ ] **Fix BUG-2** — iex_arbitrage_savings hardcoded to 0 (M3, critical)
-- [ ] **kVA-based demand charges** — India uses apparent power, not active (DEBT-7)
-- [ ] **BESS degradation model** — cycle/calendar aging in dispatch economics (M3-F2)
+- [ ] **MOIRAI-2** — Salesforce foundation model, probabilistic forecasts
+- [ ] **Real-time pipeline** — Open-Meteo forecast API → model inference → dispatch recommendation
+- [ ] **Multi-consumer aggregation** — portfolio-level dispatch across all 6 consumers
+- [ ] **Customer-facing demo** — polish dashboard for APEPDCL presentation
 
 ### Completed ✅
 
-- [x] **Interactive dashboard** — Live prediction, quality scorecard, forecast accuracy (Session 9)
-- [x] **README.md rewrite** — product thinking, M1 showcase, dashboard, AD-13 to AD-19 (Session 9)
-- [x] **M1 quality/ subpackage refactor** — A/A/A code review, 10 files, 127 tests (Session 8)
-- [x] **M1 code review fixes** — vectorization, correctness, edge cases (Session 7)
-- [x] **M1 Data Quality Engine** — 6 India-specific detectors (Session 6)
-- [x] **ROADMAP restructured to PRD modules** — M1-M6 alignment (Session 6)
-- [x] **Chronos-Bolt integration** — 8.9% MAPE zero-shot (Session 5)
-- [x] **IEX price collector** — CSV parser + synthetic generator (Session 5)
-- [x] **Fix CV fold 1** — expanding window CV min_train_size=4000 (Session 5)
+- [x] **Strategy 1 benchmark (Chronological Cutoff)** — 42 meters, median MAPE 42.1%, 88% over-forecast bias discovered via MBE tracking (Session 8)
+- [x] **50-meter MDMS data loaded** — 717K rows (5 SP + 45 TP), 30-min intervals, profiled, deduped, vendor-mapped (Session 8)
+- [x] **MBE metric tracking** — Mean Bias Error now tracked alongside MAPE/MAE for directional bias detection (Session 8)
+- [x] **Real-data dashboard v3** — Linear/Stripe-inspired interactive dashboard with all holdout+training dates, animated predictions, per-consumer profiles (Sessions 6-7)
+- [x] **Real meter data trained** — LightGBM per consumer on APEPDCL data, 75/25 stratified holdout (Session 6)
+- [x] **Data generation pipeline** — `gen_full_dashboard_data.py` produces complete holdout + sampled training predictions (Session 7)
+- [x] **Product principle integration** — dashboard design grounded in Bob Baxley, Elena Verna, Casey Winters, Crystal Widjaja podcast principles (Session 7)
+- [x] **Chronos-Bolt integration** — 8.9% MAPE zero-shot, beats naive by 2.0pp (Session 5)
+- [x] **IEX price collector** — CSV parser + synthetic generator with realistic noise (Session 5)
+- [x] **Fix CV fold 1** — expanding window CV with min_train_size=4000 (Session 5)
 
 
 ---
@@ -272,132 +320,91 @@ Priority follows EIL PRD module architecture: M1 → M2 → M3 → M4.
 | `PROGRESS.md` | This file — project tracker |
 | `src/edgegrid_forecast/data/features.py` | Feature pipeline (112 features, 8 families) |
 | `src/edgegrid_forecast/training/train_demand.py` | Training pipeline with A/B comparison |
+| `src/edgegrid_forecast/training/train_real_demand.py` | Real meter data training pipeline (LightGBM per consumer) |
 | `src/edgegrid_forecast/utils/constants.py` | IEX prices, BESS params, tariff slabs, consumer locations |
 | `src/edgegrid_forecast/models/foundation.py` | Chronos-Bolt zero-shot forecaster |
 | `src/edgegrid_forecast/data/collectors/iex_prices.py` | IEX DAM price collector (CSV + synthetic) |
 | `src/edgegrid_forecast/data/collectors/pull_all.py` | Data collection orchestrator |
-| `ROADMAP.md` | Module-aligned roadmap (M1-M6) matching EIL PRD |
-| `tests/test_quality.py` | 127 tests covering all M1 features + edge cases + input validation |
+| `edgegrid-real-data-dashboard.html` | Interactive forecast dashboard — real APEPDCL data, bundled single-file HTML |
+| `edgegrid-real-dashboard-src/App.tsx` | Dashboard source (React 18 + TypeScript + recharts + shadcn/ui) |
+| `edgegrid-real-dashboard-src/dashboard_data.json` | 1.6MB JSON — all holdout + sampled training predictions per consumer |
+| `gen_full_dashboard_data.py` | Script that trains per-consumer LightGBM and generates dashboard JSON |
+| `real_data_splits.pkl` | Pickled train/holdout DataFrames per consumer (7.1MB) |
+| `real_data_results.pkl` | Pickled predictions: y_holdout, y_pred_lgb, y_pred_prophet per consumer |
+| `real_meter_data_clean_100pct.csv` | Full cleaned APEPDCL meter data (10MB, ~48K rows, 6 consumers) |
+| `real_meter_data_train_75pct.csv` | 75% training split (7.8MB) |
+| `real_meter_data_holdout_25pct.csv` | 25% holdout split (2.7MB) |
+| `sp_data.parquet` | Single-phase MDMS data — 5 meters, 63K rows, 30-min |
+| `tp_data.parquet` | Three-phase MDMS data — 45 meters, 654K rows (dedup), 30-min |
+| `holdout_benchmark.py` | Multi-strategy benchmark framework (chronological, stratified, rolling) |
+| `benchmark_chronological.csv` | Strategy 1 results — 42 meters, MAPE/MAE/MBE/RMSE per meter |
+| `STRATEGY_1_CHRONOLOGICAL_CUTOFF.md` | Complete analysis document for Strategy 1 |
+| `benchmark_cache.pkl` | Pre-computed feature-engineered data for all 42 eligible meters |
 
 
 ---
 
 ## 10. Session Log
 
-### Session 9 — 2026-04-15
-**Focus:** Interactive dashboard + README rewrite with product thinking
+### Session 8 — 2026-04-16
+**Focus:** 50-meter MDMS data load + Multi-strategy holdout benchmark (Strategy 1)
 
 What got done:
-- Built interactive HTML dashboard using web-artifacts-builder (React + TypeScript + Tailwind + recharts)
-- Three panels designed around activation and aha moment principles:
-  1. **Live Prediction** — animated demand streaming against pre-plotted forecast, running MAPE counter,
-     confidence band, playback controls (1x/2x/4x/8x), scrubber, insight card after 20 intervals
-  2. **M1 Quality Scorecard** — quality gauge, anomaly pie, horizontal bar breakdown, completeness
-     heatmap (hour x day), cross-consumer summary table
-  3. **Forecast Accuracy** — model comparison table with toggle visibility, actual-vs-predicted time
-     series, error distribution histogram, hourly MAPE curves, cross-consumer comparison
-- Synthetic data layer: seeded PRNG (mulberry32), Box-Muller normal distribution, 6 consumer profiles
-  with realistic Indian load curves, quality stats computation, forecast metrics computation
-- Bundled to single self-contained HTML file (952K) via Parcel + html-inline
-- Rewrote README.md with product thinking:
-  - Added "What Makes This Different" section positioning data quality as competitive advantage
-  - Added M1 Data Quality Engine section with full architecture table and design principles
-  - Added Interactive Dashboard section describing all 3 panels
-  - Updated project structure to show quality/ subpackage (10 files)
-  - Updated test count from 35+ to 127
-  - Added architecture decisions AD-13 through AD-19
-  - Updated status table to reflect M1 completion and dashboard
-- Updated ROADMAP.md: changed M1 from "In Progress" to "COMPLETE" with all checkboxes checked
-- Updated PROGRESS.md: added Session 9 log, fixed commit history, updated test count reference
+- Loaded 3 new APEPDCL files: SP meter data (63K rows, 5 single-phase), TP meter data (788K raw → 654K dedup, 45 three-phase), vendor mapping (50 meters)
+- Profiled all datasets: data quality excellent (99-100% completeness, zero nulls, small gaps only)
+- Discovered demand tiers: 6 HT (>5kWh, 11kV feeders), 2 Large, 31 Medium, 6 Small — great variety for model stress-testing
+- Built unified data pipeline normalizing SP+TP into common schema with 31 features
+- Designed 3 holdout strategies: Chronological Cutoff, Stratified Temporal, Rolling Origin
+- Implemented and ran Strategy 1 (Chronological Cutoff) across all 42 eligible meters with early stopping, proper val split, detailed diagnostics
+- Tracked MAPE + MAE + MBE for the first time — discovered systematic over-forecasting bias (+10.5% mean)
+- Wrote comprehensive Strategy 1 analysis document (STRATEGY_1_CHRONOLOGICAL_CUTOFF.md)
 
-Product thinking insights (from Brian Balfour, Elena Verna, Casey Winters, Crystal W., Bob Baxley podcasts):
-- Elena's "wow moment" > "aha moment" — user should think "it actually predicted that?"
-- Crystal's activation constraint — time-to-value under 15 seconds, live view answers trust viscerally
-- Bob Baxley's emotional design — green for confidence, pulse animation creates life
-- Live Prediction tab is the front door — activation first, analysis second
-
-### Session 8 — 2026-04-15
-**Focus:** M1 quality → A+/A/A refactor
-
-What got done:
-- Deep audit of quality.py: cataloged 9 performance, 8 correctness, 5 maintainability issues
-- Split 1,537-line monolith into 10-file quality/ subpackage:
-  - `_constants.py` (83 lines): All magic numbers extracted as named constants
-  - `ami.py` (295 lines): M1-F1 AMI ingestion — vectorized detect_gaps, division-safe consistency
-  - `anomaly.py` (232 lines): M1-F2 detection — consistent NaN handling, input validation
-  - `voltage.py` (227 lines): M1-F3 SOC correction — vectorized known_state_periods
-  - `noise.py` (173 lines): M1-F4 demand filter — cached rolling computations
-  - `dg.py` (173 lines): M1-F5 DG transitions — input validation, string constants
-  - `apfc.py` (156 lines): M1-F6 APFC events — input validation, string constants
-  - `imputation.py` (97 lines): Fixed zero-leak bug in hybrid short gap fill
-  - `pipeline.py` (206 lines): Proper quality scoring, single detector instantiation
-  - `__init__.py` (90 lines): Complete re-exports, zero breaking changes
-- Performance fixes: vectorized detect_gaps and detect_known_state_periods loops,
-  cached baseline rolling computations in DemandNoiseFilter, .where() instead of .replace()
-- Correctness fixes: division-safe physical consistency, .fillna(False) on all edge
-  detectors, proper frequency inference for seasonal imputation, sentinel-free gap fill
-- Added constructor input validation to all 4 detector classes
-- Added __init__ docstrings to all 4 classes
-- 7 new tests: cache invalidation, degree mutation guard, 5 input validation tests
-- Final ratings: Security A, Performance A, Correctness A, Maintainability A, Test Coverage A
-- 127 total tests, all passing
-- Commit `034c0db` pushed to main
-
-Key architectural decisions:
-- AD-16: Subpackage over monolith — each M1 feature gets its own file (max 295 lines)
-- AD-17: Named constants > magic numbers — _constants.py is single source of truth
-- AD-18: Input validation on constructors — fail fast with clear error messages
-- AD-19: Cache rolling computations in DemandNoiseFilter (identity-based invalidation)
+Key findings:
+- Median MAPE 42.1% on pure forward-looking split (hardest test)
+- 88% of meters over-forecast — model trained on summer demand, test is winter → bias correction is low-hanging fruit
+- HT meters most predictable (20.4% median MAPE), Medium meters hardest (44.5%)
+- Zero/intermittent loads inflate MAPE dramatically (172% avg for >20% zeros vs 46% for <5%)
+- lag_48 (same time yesterday) dominates feature importance — explains why chronological hurts when seasons shift
+- Data length does NOT correlate with accuracy (r=0.07) — load stability matters more
 
 ### Session 7 — 2026-04-15
-**Focus:** M1 code review fixes + test coverage hardening
+**Focus:** Dashboard v3 — Linear/Stripe redesign + full holdout/training date picker
 
 What got done:
-- Ran structured code review (Security A, Performance B-, Correctness B, Maintainability B+)
-- Fixed 5 correctness/safety bugs:
-  - C-1: Operator precedence ambiguity in validate_physical_ranges (explicit parens)
-  - C-2: Wired voltage confirmation into `dg_confidence` column (was dead code)
-  - C-4: calibrate() mutated self.polynomial_degree — fixed with local variable
-  - C-5: detect_gaps crashes on empty series (NaT from min/max) — added early return guard
-  - M-3: Removed unused `field` import
-- Fixed 4 performance issues (all vectorized, removing Python loops):
-  - P-1: detect_frozen_readings — groupby.transform instead of loop over run IDs
-  - P-2: Seasonal imputation — shift(freq=) caused index misalignment, fixed with shift(periods=)
-  - P-3: normalize_for_dr_baseline — vectorized with shift(1) and boolean masking
-  - P-4: detect_outliers_contextual — groupby.transform z-scores instead of loop
-- Added 11 new tests (120 total, all passing):
-  - T-1: Isolation Forest multivariate outlier detection (3 tests)
-  - T-2: Physical range validation with NaN inputs (2 tests)
-  - T-3: Empty/single-row edge cases for detect_gaps, frozen readings, z-score, imputation, pipeline (5 tests)
-  - DG confidence column verification (1 test)
-- Commit `c6bea44` pushed to main
+- Redesigned dashboard with Linear/Stripe-inspired design system: zinc-950 backgrounds, Inter font, 1px subtle borders, semantic color only for meaning
+- Expanded date picker to include ALL holdout dates (green indicator) + ~10 sampled training dates (blue indicator) per consumer, grouped under labeled headers
+- Each date shows per-day MAPE in the picker for quick scanning
+- TRAIN/HOLDOUT badge displayed next to date picker for active context
+- Wrote `gen_full_dashboard_data.py` to re-train LightGBM per consumer and produce predictions for both splits
+- Generated 1.6MB `dashboard_data.json` with complete holdout + sampled training intervals
+- Bundled to single 2.3MB HTML artifact via Parcel + html-inline
+- Applied product principles from podcast transcripts: "insights per minute" (Elena), "chapter one first" (Casey), "clear thinking made visible" (Baxley), "perceived simplicity" (Casey/WhatsApp)
+
+Consumer day counts in dashboard:
+- RJY1197: 19 holdout + 9 training = 28 days
+- RJY1622: 60 holdout + 9 training = 69 days
+- SKL724: 81 holdout + 9 training = 90 days
+- VSP2315: 81 holdout + 9 training = 90 days
+- VSP2432: 58 holdout + 9 training = 67 days
+- VSP2439: 54 holdout + 9 training = 63 days
 
 ### Session 6 — 2026-04-15
-**Focus:** PRD alignment + M1 Data Quality Engine (India-specific)
+**Focus:** Real APEPDCL meter data → trained models → interactive dashboard
 
 What got done:
-- Analyzed full EIL PRD document (12 sections, 25 tables, 6 modules M1-M6)
-- Identified gap: our engine is ~70% on M2 (Forecasting) but only ~10% on M1 (Data Quality)
-- Restructured ROADMAP.md from Phase 0-6 to M1-M6 module architecture matching the PRD
-- Built complete M1 Data Quality Engine in `quality.py` (231 → 720+ lines):
-  - M1-F1: AMI ingestion — gap detection, duplicate handling, late arrivals, channel sync, range validation, physical consistency, quality scoring
-  - M1-F2: Enhanced anomaly detection — added contextual (time-of-day z-score) and rolling (48h baseline) outlier detectors
-  - M1-F3: VoltageSOCCorrector class — polynomial regression for voltage→SOC error, calibration/correction/drift detection, known-state period detection
-  - M1-F4: DemandNoiseFilter class — CT artefact detection (rolling baseline + frequency), PF artefact detection (kVA spike + stable kW), signal cleaning
-  - M1-F5: DGTransitionDetector class — grid import drop detection, voltage signature, DG period marking with transition labels, training data exclusion
-  - M1-F6: APFCSwitchingDetector class — kVA step detection, kW stability confirmation, PF jump classification, DR baseline normalization
-- Full integration: `run_quality_pipeline()` orchestrates all M1 detectors per consumer
-- QualityReport dataclass for structured reporting per consumer
-- Wrote 52 comprehensive tests covering all M1 features — all passing
-- Full test suite: 109 tests, all green
-- Updated README.md (previous session) and PROGRESS.md
+- Loaded real APEPDCL HT consumer meter data (6 consumers, ~48K hourly rows)
+- Cleaned data: handled nulls, outliers, timezone normalization to Asia/Kolkata
+- Split into 75% training / 25% holdout using stratified temporal holdout (every 4th complete day)
+- Exported CSVs: 100% clean (10MB), 75% train (7.8MB), 25% holdout (2.7MB)
+- Trained per-consumer LightGBM models with 50+ features (temporal, lag, rolling, consumption)
+- Built first interactive dashboard (React + TypeScript + recharts + shadcn/ui) showing real predictions vs actuals
+- Iterated through v1 (functional) → v2 (principle-driven with narrative arc)
+- Pickled all model results for reproducibility
 
-Key architectural decisions:
-- AD-13: ROADMAP aligned to EIL PRD M1-M6 module structure
-- AD-14: India-specific quality > generic — these detectors create 6-12mo replication moat
-- AD-15: Per-interval quality score as weighted composite (completeness/timeliness/validity/consistency)
-
-Key insight: Indian grid data has 5 unique noise sources that generic quality pipelines miss. Building these detectors first creates defensibility per PRD's moat analysis (voltage SOC = 6-12mo, demand filter = 3-6mo). M1 is now the strongest module in our stack.
+Key insights:
+- Real meter data confirmed: manufacturing consumers (RJY1197, SKL724, VSP2439) have more predictable load shapes
+- LightGBM with lag + rolling features achieves strong holdout MAPE even without weather enrichment
+- Stratified temporal holdout (every 4th day) ensures seasonal coverage in both splits
 
 ### Session 5 — 2026-04-15
 **Focus:** Foundation models + IEX price infrastructure + CV robustness

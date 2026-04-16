@@ -23,8 +23,9 @@ ENV/
 data/raw/*.xlsx
 data/raw/*.csv
 data/processed/*
-# Exception: track cleaned real meter data for reproducibility
+# Exception: track cleaned real meter data and benchmark results for reproducibility
 !data/processed/real_meter_data_*.csv
+!data/processed/benchmark_*.csv
 
 # Models (binary artifacts at project root, not source code)
 /models/
