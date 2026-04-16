@@ -6,9 +6,27 @@
 **Run date:** 2026-04-16
 **Dataset:** 50 APEPDCL smart meters (5 SP + 45 TP), 30-min intervals
 **Eligible meters:** 42 (filtered to >= 180 days of data)
-**Model:** LightGBM with early stopping (500 max rounds, patience=30)
-**Features:** 31 (temporal + cyclical + 9 lags + 16 rolling stats)
+**Model (v1):** LightGBM with early stopping (500 max rounds, patience=30)
+**Features (v1):** 31 (temporal + cyclical + 9 lags + 16 rolling stats)
+**Model (v3):** LightGBM with two-pass feature selection, 800 max rounds, patience=50
+**Features (v3):** 43 candidates → ~25 selected per meter (added weather, holidays, derived)
 
+
+---
+
+## 0. Version Progression on Strategy 1
+
+This document was originally written for the v1 baseline. The engine has since been iterated through v3 on Strategy 1:
+
+| Version | Features | Selection | Mean MAPE | Median MAPE | Key Change |
+|---------|----------|-----------|-----------|-------------|------------|
+| **v1** | 18 temporal + lag | None | 55.0% | 42.2% | Baseline (this document's original results) |
+| **v2** | 78 (added weather, voltage, derived) | None | 59.6% | 42.2% | Overfitting — 57% of meters regressed |
+| **v3** | 43 → ~25 selected | Two-pass | 10.1% | 7.6% | Feature selection breakthrough |
+
+**v1 → v3 represents an 82% reduction in mean MAPE.** The sections below document the v1 baseline results in full. The v3 improvement came from two-pass feature selection (see `docs/V4_ENGINE_ARCHITECTURE.md`) and the addition of weather, holiday, and derived features — but critically, with intelligent selection that prevented the overfitting disaster seen in v2.
+
+**Note:** The current production candidate is v4, which uses Strategy 2 (Stratified Temporal) and achieves 4.9% median MAPE. See `docs/STRATEGY_2_STRATIFIED_TEMPORAL.md` for the latest results.
 
 ---
 

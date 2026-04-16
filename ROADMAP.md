@@ -4,7 +4,7 @@
 > **Outcome:** Reduce landed cost of electricity for C&I consumers by 12-18% through optimal battery dispatch
 > **Owner:** Praveen Peddi | **Repo:** `praveenpeddi88/edgegrid-forecast-engine`
 > **Architecture reference:** EIL PRD v1 (M1-M6 module architecture)
-> **Last updated:** 2026-04-15
+> **Last updated:** 2026-04-16
 
 ---
 
@@ -155,30 +155,34 @@ Everything built before the PRD alignment. This work maps across M2, M3, and M4 
 
 ---
 
-## M2 — Forecasting Engine 🔧 (partially complete)
+## M2 — Forecasting Engine 🔧 (demand complete, solar/price pending)
 
 **PRD reference:** Module M2, Features M2-F1 through M2-F4
-**Status:** ~70% complete from Phase 0. Demand forecasting works well. Solar and price forecasting infrastructure exists but needs validation against real data.
+**Status:** ~85% complete. Demand forecasting validated on real data with 4.9% median MAPE. Solar and price forecasting infrastructure exists but needs validation.
 
 **Phase 1 acceptance criteria (from PRD):**
-- [ ] Demand MAPE <12% on real consumer data (24h ahead)
+- [x] Demand MAPE <12% on real consumer data (24h ahead) → **4.9% median MAPE achieved (v4 S2)**
 - [ ] Solar forecast available for dispatch (physics + ML hybrid)
 - [ ] IEX price pattern forecast for day-ahead dispatch
-- [ ] 15-minute resolution for all forecasts (currently hourly)
+- [ ] 15-minute resolution for all forecasts (currently 30-min)
 
-### M2-F1: Demand Forecasting ✅ (synthetic) / ⬚ (real data)
+### M2-F1: Demand Forecasting ✅ (real data validated)
 
 **Complete:**
-- [x] LightGBM with 112 features, 8 families → 2.27% val MAPE
-- [x] Chronos-Bolt zero-shot → 8.9% avg MAPE (cold-start fallback)
-- [x] Prophet + ensemble with inverse-MAPE weighting
-- [x] Expanding window CV with min_train_size=4000 → 7.14% MAPE
+- [x] LightGBM v4 with 66-feature pipeline, two-pass selection → 4.9% median MAPE on 42 real meters
+- [x] Per-tier adaptive regularization (HT/Medium/Small different hyperparameters)
+- [x] Strategy 1 (Chronological) + Strategy 2 (Stratified Temporal) benchmarks complete
+- [x] v1→v4 progression: 55.0% → 59.6% → 10.1% → 9.1% mean MAPE (91% improvement)
+- [x] Chronos-Bolt zero-shot evaluated as ensemble partner → pure LightGBM preferred for 41/42 meters
+- [x] Cold-start protocol: Chronos days 1-14, limited LightGBM days 15-60, full v4 days 60+
+- [x] Hybrid strategy routing: S1 for HT meters, S2 for Medium/Small
+- [x] Interactive dashboards for both strategies (React + TypeScript + Recharts)
 
 **Remaining:**
-- [ ] Validate on real APEPDCL meter data (⛔ blocked on data acquisition)
-- [ ] Retrain at 15-min resolution (96 intervals/day vs 24)
+- [ ] Retrain at 15-min resolution (96 intervals/day vs current 48)
 - [ ] Add month-to-date peak tracking feature for demand charge optimization
 - [ ] Conformal prediction for calibrated uncertainty bounds
+- [ ] Deep learning evaluation (TFT, PatchTST) for v5
 
 ### M2-F2: Solar Generation Forecasting ⬚
 
@@ -196,10 +200,10 @@ Everything built before the PRD alignment. This work maps across M2, M3, and M4 
 - [ ] Build 15-min block price forecast (IEX settles at 15-min, not hourly)
 - [ ] Automated IEX DAM price collection (scraper or API when available)
 
-### M2-F4: Ensemble & Model Selection ⬚
+### M2-F4: Ensemble & Model Selection 🔧 (partially complete)
 
-- [ ] Automated model selection per consumer: LightGBM vs Chronos vs Prophet
-- [ ] Ensemble weighting: inverse-MAPE or stacking
+- [x] Adaptive ensemble evaluation: LightGBM vs Chronos grid search → pure LightGBM preferred (41/42 meters)
+- [x] Cold-start protocol with Chronos fallback for new meters
 - [ ] TimesFM 2.5 / MOIRAI-2 integration for model diversity
 - [ ] Forecast monitoring: track MAPE drift, alert on degradation
 
@@ -324,8 +328,8 @@ Everything built before the PRD alignment. This work maps across M2, M3, and M4 
 
 | Metric | Current (Phase 0) | Target (Phase 1) | Target (Production) | Module |
 |--------|-------------------|-------------------|---------------------|--------|
-| Demand MAPE (24h-ahead) | 9.53% (synthetic) | <12% (real data) | <8% | M2 |
-| Chronos zero-shot MAPE | 8.9% (synthetic) | <12% (real data) | <10% | M2 |
+| Demand MAPE (24h-ahead) | **4.9% median (real, v4 S2)** | <12% (real data) ✅ | <8% ✅ | M2 |
+| Chronos zero-shot MAPE | ~44% (real data) | <12% (real data) | <10% | M2 |
 | Solar MAPE (24h-ahead) | Not measured | <15% | <10% | M2 |
 | SOC correction accuracy | N/A | ±2% of lab reference | ±1% | M1 |
 | Data quality score | 100% (synthetic) | >95% (real data) | >98% | M1 |
