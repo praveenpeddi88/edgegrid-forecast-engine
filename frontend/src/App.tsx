@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
+  ComposedChart,
   Legend,
   Line,
   LineChart,
@@ -14,105 +14,91 @@ import {
   YAxis,
 } from "recharts";
 import {
-  forceCenter,
-  forceLink,
-  forceManyBody,
-  forceSimulation,
-  forceX,
-  forceY,
-} from "d3-force";
-import { select } from "d3-selection";
-import { zoom, zoomIdentity } from "d3-zoom";
-import {
-  Activity,
   ArrowLeft,
-  Battery,
-  Download,
-  Factory,
+  Calendar,
+  ChevronRight,
   Gauge,
-  Grid,
+  Layers,
   LayoutDashboard,
   Network as NetworkIcon,
   Zap,
 } from "lucide-react";
 import {
-  CommercialResponse,
-  DispatchResponse,
-  FLSQuote,
-  GraphNode,
-  MeterForecastResponse,
-  NetworkGraph,
-  Portfolio,
-  api,
-} from "./api";
+  FleetReplayResponse,
+  FleetSummary,
+  MeterHistoryResponse,
+  MeterReplay,
+  MeterSummary,
+  showcase,
+} from "./showcase-api";
 
-// ────────────────────── routing (minimal state machine) ──────────────────────
+// ────────────────────── routing ──────────────────────────────────────────────
 
 type Route =
-  | { name: "home" }
+  | { name: "showcase" }
   | { name: "meter"; msn: string }
-  | { name: "dispatch"; substationId: string }
-  | { name: "commercial"; substationId: string }
+  | { name: "network" }
   | { name: "portfolio" };
 
-// ────────────────────── top-level App ────────────────────────────────────────
+// ────────────────────── App shell ────────────────────────────────────────────
 
 export default function App() {
-  const [route, setRoute] = useState<Route>({ name: "home" });
+  const [route, setRoute] = useState<Route>({ name: "showcase" });
   const [version, setVersion] = useState<string>("");
+  const [builtAt, setBuiltAt] = useState<string>("");
 
   useEffect(() => {
-    api.modelVersion().then((v) => setVersion(v.model_version)).catch(() => {});
+    fetch("/api/model/version")
+      .then((r) => r.json())
+      .then((v) => {
+        setVersion(v.model_version);
+        setBuiltAt(v.built_at || "");
+      })
+      .catch(() => {});
   }, []);
 
   return (
     <div className="min-h-screen flex flex-col">
       <TopBar route={route} setRoute={setRoute} />
       <main className="flex-1 min-h-0">
-        {route.name === "home" && <NetworkHome setRoute={setRoute} />}
+        {route.name === "showcase" && <ForecastShowcase setRoute={setRoute} />}
         {route.name === "meter" && (
-          <MeterDetail msn={route.msn} back={() => setRoute({ name: "home" })} />
+          <MeterDetail msn={route.msn} back={() => setRoute({ name: "showcase" })} />
         )}
-        {route.name === "dispatch" && (
-          <DispatchConsole
-            substationId={route.substationId}
-            goCommercial={() =>
-              setRoute({ name: "commercial", substationId: route.substationId })
-            }
-            back={() => setRoute({ name: "home" })}
-          />
-        )}
-        {route.name === "commercial" && (
-          <CommercialBrief
-            substationId={route.substationId}
-            back={() => setRoute({ name: "dispatch", substationId: route.substationId })}
-          />
+        {route.name === "network" && (
+          <NetworkPlaceholder back={() => setRoute({ name: "showcase" })} />
         )}
         {route.name === "portfolio" && (
-          <PortfolioView back={() => setRoute({ name: "home" })} />
+          <PortfolioView back={() => setRoute({ name: "showcase" })} />
         )}
       </main>
-      <Footer modelVersion={version} />
+      <Footer modelVersion={version} builtAt={builtAt} />
     </div>
   );
 }
 
 function TopBar({ route, setRoute }: { route: Route; setRoute: (r: Route) => void }) {
   return (
-    <header className="flex items-center justify-between px-6 py-3 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur">
+    <header className="flex items-center justify-between px-6 py-3 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur sticky top-0 z-20">
       <button
-        onClick={() => setRoute({ name: "home" })}
+        onClick={() => setRoute({ name: "showcase" })}
         className="flex items-center gap-2 text-teal-500 hover:text-teal-600 transition-colors duration-fast font-semibold"
       >
         <Zap className="w-5 h-5" />
-        EdgeGrid <span className="text-zinc-500 font-normal">Dispatch Console</span>
+        EdgeGrid <span className="text-zinc-500 font-normal hidden sm:inline">Forecast Engine</span>
       </button>
       <nav className="flex items-center gap-1 text-sm">
         <NavBtn
+          icon={<Gauge className="w-4 h-4" />}
+          label="Accuracy"
+          active={route.name === "showcase" || route.name === "meter"}
+          onClick={() => setRoute({ name: "showcase" })}
+        />
+        <NavBtn
           icon={<NetworkIcon className="w-4 h-4" />}
           label="Network"
-          active={route.name === "home"}
-          onClick={() => setRoute({ name: "home" })}
+          active={route.name === "network"}
+          onClick={() => setRoute({ name: "network" })}
         />
         <NavBtn
           icon={<LayoutDashboard className="w-4 h-4" />}
@@ -136,7 +122,9 @@ function NavBtn(props: {
       onClick={props.onClick}
       className={
         "px-3 py-1.5 rounded-md flex items-center gap-2 transition-colors duration-fast " +
-        (props.active ? "bg-zinc-800 text-white" : "text-zinc-400 hover:text-white hover:bg-zinc-900")
+        (props.active
+          ? "bg-zinc-800 text-white"
+          : "text-zinc-400 hover:text-white hover:bg-zinc-900")
       }
     >
       {props.icon}
@@ -145,544 +133,751 @@ function NavBtn(props: {
   );
 }
 
-function Footer({ modelVersion }: { modelVersion: string }) {
+function Footer({ modelVersion, builtAt }: { modelVersion: string; builtAt: string }) {
+  const trained = builtAt
+    ? new Date(builtAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    : "";
   return (
     <footer className="flex items-center justify-between px-6 py-2 text-xs text-zinc-500 border-t border-zinc-900">
-      <span>Clean, commercially-optimal energy delivery at the last mile.</span>
+      <span>v4 forecasting engine · 42 meters · APEPDCL Visakhapatnam</span>
       <span>
-        model <code className="text-zinc-300">{modelVersion || "loading…"}</code>
+        {modelVersion ? (
+          <>
+            Model <code className="text-zinc-300">{modelVersion}</code>
+            {trained ? ` · trained ${trained}` : ""}
+          </>
+        ) : (
+          "loading model…"
+        )}
       </span>
     </footer>
   );
 }
 
-// ────────────────────── Screen: Network Home (D3 force graph) ────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// SCREEN 1 — ForecastShowcase (landing)
+// "See the v4 engine forecasting accurately, live on 42 real meters."
+// ═══════════════════════════════════════════════════════════════════════════
 
-function NetworkHome({ setRoute }: { setRoute: (r: Route) => void }) {
-  const [graph, setGraph] = useState<NetworkGraph | null>(null);
-  const [selected, setSelected] = useState<GraphNode | null>(null);
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
+function ForecastShowcase({ setRoute }: { setRoute: (r: Route) => void }) {
+  const [summary, setSummary] = useState<FleetSummary | null>(null);
+  const [meters, setMeters] = useState<MeterSummary[]>([]);
+  const [replay, setReplay] = useState<FleetReplayResponse | null>(null);
+  const [asOf, setAsOf] = useState<string>("");
+  const [availableRange, setAvailableRange] =
+    useState<{ min: string; max: string } | null>(null);
+  const [tierFilter, setTierFilter] = useState<string | null>(null);
+  const [loading, setLoading] = useState<"init" | "replay" | null>("init");
+  const [error, setError] = useState<string | null>(null);
+  // Monotonic generation counter — only the latest replay request is allowed
+  // to set state. StrictMode double-invokes effects in dev, and the naive
+  // `cancelled` boolean loses races between responses.
+  const replayGenRef = useRef(0);
 
   useEffect(() => {
-    api.network().then(setGraph).catch((e) => console.error(e));
+    let cancelled = false;
+    (async () => {
+      try {
+        const [s, m, r] = await Promise.all([
+          showcase.fleetSummary(),
+          showcase.meters(),
+          showcase.actualsRange(),
+        ]);
+        if (cancelled) return;
+        setSummary(s);
+        setMeters(m.meters);
+        if (r.max) {
+          const maxTs = new Date(r.max);
+          const defaultAsOf = new Date(maxTs.getTime() - 48 * 3600 * 1000);
+          setAsOf(defaultAsOf.toISOString());
+          setAvailableRange({ min: r.min || "", max: r.max });
+        }
+      } catch (e: any) {
+        setError(e.message || String(e));
+        setLoading(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
+  // Stable join key — keyed on MSN list rather than the meters-array identity,
+  // so StrictMode re-mounts don't spuriously re-trigger the 12s replay.
+  const msnsKey = useMemo(() => meters.map((m) => m.msn).join(","), [meters]);
+
   useEffect(() => {
-    if (!graph || !svgRef.current || !containerRef.current) return;
-    const svg = select(svgRef.current);
-    svg.selectAll("*").remove();
-    const width = containerRef.current.clientWidth;
-    const height = containerRef.current.clientHeight;
-    const g = svg.append("g");
-
-    // Zoom/pan
-    const z = zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.2, 4])
-      .on("zoom", (ev) => g.attr("transform", ev.transform));
-    svg.call(z as any).call(z.transform as any, zoomIdentity);
-
-    // Copy because d3-force mutates
-    const nodes = graph.nodes.map((n) => ({ ...n }));
-    const links = graph.edges.map((e) => ({
-      source: e.source,
-      target: e.target,
-      edge_type: e.edge_type,
-    }));
-
-    const kindColor: Record<string, string> = {
-      substation: "#0E7C7B",
-      meter: "#38BDF8",
-      feeder: "#A78BFA",
-      bess: "#FB923C",
-      solar: "#FBBF24",
-      ci_load: "#F472B6",
-      weather: "#64748B",
-      iex: "#94A3B8",
-    };
-    const kindSize: Record<string, number> = {
-      substation: 14, meter: 5, feeder: 7, bess: 10,
-      solar: 8, ci_load: 7, weather: 6, iex: 8,
-    };
-    const meterColor = (n: any) => {
-      if (n.kind !== "meter") return kindColor[n.kind] || "#64748B";
-      const m = n.holdout_mape ?? 10;
-      if (m < 8) return "#10B981";
-      if (m < 12) return "#F59E0B";
-      return "#EF4444";
-    };
-
-    const link = g.append("g").attr("stroke", "#27272A").attr("stroke-opacity", 0.6)
-      .selectAll("line").data(links).join("line").attr("stroke-width", 1);
-
-    const node = g.append("g").selectAll("circle")
-      .data(nodes)
-      .join("circle")
-      .attr("r", (d: any) => kindSize[d.kind] || 5)
-      .attr("fill", meterColor)
-      .attr("stroke", "#09090B")
-      .attr("stroke-width", 1.5)
-      .style("cursor", "pointer")
-      .on("click", (_e, d: any) => {
-        setSelected(d);
+    if (!asOf || !msnsKey) return;
+    const myGen = ++replayGenRef.current;
+    setLoading((cur) => (cur === "init" ? "init" : "replay"));
+    showcase
+      .fleetReplay(msnsKey.split(","), asOf, 48)
+      .then((r) => {
+        if (myGen !== replayGenRef.current) return;
+        setReplay(r);
+        setLoading(null);
+      })
+      .catch((e) => {
+        if (myGen !== replayGenRef.current) return;
+        setError(e.message || String(e));
+        setLoading(null);
       });
+  }, [asOf, msnsKey]);
 
-    node.append("title").text((d: any) => `${d.label} (${d.kind})`);
+  const tiles = useMemo(() => {
+    if (meters.length === 0) return [];
+    const byMsn: Record<string, MeterReplay> = replay
+      ? Object.fromEntries(replay.meters.map((m) => [m.msn, m]))
+      : {};
+    return meters
+      .map((m) => ({ meta: m, replay: byMsn[m.msn] }))
+      .filter((t) => !tierFilter || t.meta.tier === tierFilter);
+  }, [replay, meters, tierFilter]);
 
-    const sim = forceSimulation(nodes as any)
-      .force("link", forceLink(links as any).id((d: any) => d.id).distance(40).strength(0.4))
-      .force("charge", forceManyBody().strength(-120))
-      .force("center", forceCenter(width / 2, height / 2))
-      .force("x", forceX(width / 2).strength(0.03))
-      .force("y", forceY(height / 2).strength(0.03));
-
-    sim.on("tick", () => {
-      link
-        .attr("x1", (d: any) => d.source.x)
-        .attr("y1", (d: any) => d.source.y)
-        .attr("x2", (d: any) => d.target.x)
-        .attr("y2", (d: any) => d.target.y);
-      node
-        .attr("cx", (d: any) => d.x)
-        .attr("cy", (d: any) => d.y);
-    });
-
-    return () => void sim.stop();
-  }, [graph]);
+  if (error && !summary) {
+    return <ErrorState msg={error} retry={() => window.location.reload()} />;
+  }
+  if (loading === "init" && !summary) {
+    return <InitialLoading />;
+  }
 
   return (
-    <div className="grid grid-cols-[1fr_340px] gap-0 h-[calc(100vh-96px)]">
-      <div ref={containerRef} className="relative bg-zinc-950">
-        <svg ref={svgRef} width="100%" height="100%" />
-        <Legend />
+    <div className="px-4 md:px-6 py-5 max-w-[1600px] mx-auto">
+      <ProofStrip
+        summary={summary}
+        replayMape={replay?.fleet_mape ?? null}
+        loading={loading === "replay"}
+      />
+
+      <div className="card p-4 mb-5 flex flex-wrap items-center justify-between gap-4">
+        <TimeScrubber
+          asOf={asOf}
+          setAsOf={setAsOf}
+          available={availableRange}
+          disabled={loading === "replay"}
+        />
+        <TierFilter
+          active={tierFilter}
+          setActive={setTierFilter}
+          counts={summary?.tier_counts ?? {}}
+        />
       </div>
-      <aside className="border-l border-zinc-800 bg-zinc-900/40 p-5 overflow-auto">
-        {graph ? (
-          selected ? (
-            <SidePanel node={selected} setRoute={setRoute} />
-          ) : (
-            <div>
-              <h2 className="text-lg font-semibold mb-1">The EdgeGrid network</h2>
-              <p className="muted text-sm mb-4">
-                {graph.meta.n_nodes} nodes · {graph.meta.n_edges} edges. Click any
-                node to drill in.
-              </p>
-              <GraphStats graph={graph} />
-            </div>
-          )
+
+      <section>
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-sm muted uppercase tracking-wider">
+            Live forecast vs actual · {tiles.length} meters
+          </h2>
+          <p className="text-xs muted">Click any tile for the full chart →</p>
+        </div>
+
+        {tiles.length === 0 ? (
+          <EmptyTiles tierFilter={tierFilter} reset={() => setTierFilter(null)} />
         ) : (
-          <p className="muted">Loading graph…</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+            {tiles.map((t) => (
+              <MeterTile
+                key={t.meta.msn}
+                meta={t.meta}
+                replay={t.replay}
+                onClick={() => setRoute({ name: "meter", msn: t.meta.msn })}
+              />
+            ))}
+          </div>
         )}
-      </aside>
+      </section>
     </div>
   );
 }
 
-function Legend() {
-  const items = [
-    { c: "#0E7C7B", label: "Substation" },
-    { c: "#38BDF8", label: "Meter" },
-    { c: "#A78BFA", label: "Feeder" },
-    { c: "#FB923C", label: "BESS" },
-    { c: "#FBBF24", label: "Solar" },
-    { c: "#F472B6", label: "C&I Load" },
-  ];
+function ProofStrip({
+  summary,
+  replayMape,
+  loading,
+}: {
+  summary: FleetSummary | null;
+  replayMape: number | null;
+  loading: boolean;
+}) {
+  if (!summary) return null;
+  const mainNumber = replayMape != null ? replayMape : summary.mean_mape_pct;
+  const mainLabel = replayMape != null ? "this window" : "training holdout";
   return (
-    <div className="absolute top-3 left-3 card px-3 py-2 text-xs">
-      <div className="muted mb-1">Legend</div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-        {items.map((i) => (
-          <div key={i.label} className="flex items-center gap-1.5">
-            <span
-              className="w-2.5 h-2.5 rounded-full inline-block"
-              style={{ background: i.c }}
-            />
-            <span>{i.label}</span>
-          </div>
+    <section className="mb-5">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 mb-3">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-semibold leading-tight">
+            Forecasting accuracy, live
+          </h1>
+          <p className="muted text-sm mt-1 max-w-2xl">
+            The v4 engine predicts energy demand on {summary.n_meters} real APEPDCL meters
+            at 30-minute granularity. Pick any date below to replay the forecast against
+            what actually happened.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 text-xs muted self-start md:self-auto">
+          <Layers className="w-3.5 h-3.5" />
+          LightGBM · 36 features · per-tier regularization
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <BigStat
+          value={`${mainNumber.toFixed(2)}%`}
+          label={`Mean accuracy error · ${mainLabel}`}
+          sub={loading ? "Recomputing…" : `${summary.n_meters} meters live`}
+          highlight
+        />
+        <BigStat
+          value={`${summary.median_mape_pct.toFixed(2)}%`}
+          label="Median (half the fleet is better)"
+          sub="Training holdout"
+        />
+        <BigStat
+          value={
+            summary.ht_peak_median_mape_pct != null
+              ? `${summary.ht_peak_median_mape_pct.toFixed(2)}%`
+              : "—"
+          }
+          label="HT peak-hour accuracy"
+          sub="Evening 6–10 PM · commercial window"
+        />
+        <HealthBreakdown counts={summary.health_counts} />
+      </div>
+    </section>
+  );
+}
+
+function BigStat({
+  value,
+  label,
+  sub,
+  highlight,
+}: {
+  value: string;
+  label: string;
+  sub?: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div
+      className={
+        "card p-4 " +
+        (highlight
+          ? "bg-gradient-to-br from-teal-900/40 to-zinc-900 border-teal-800/60"
+          : "")
+      }
+    >
+      <div className="text-3xl md:text-4xl font-semibold tracking-tight">{value}</div>
+      <div className="text-sm mt-1 font-medium">{label}</div>
+      {sub && <div className="text-xs muted mt-0.5">{sub}</div>}
+    </div>
+  );
+}
+
+function HealthBreakdown({
+  counts,
+}: {
+  counts: { green: number; amber: number; red: number };
+}) {
+  const total = counts.green + counts.amber + counts.red;
+  const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
+  return (
+    <div className="card p-4">
+      <div className="flex items-baseline justify-between">
+        <div className="text-3xl md:text-4xl font-semibold tracking-tight">
+          {counts.green}
+          <span className="text-lg muted font-normal">/{total}</span>
+        </div>
+        <div className="text-xs muted">under 8% error</div>
+      </div>
+      <div className="text-sm mt-1 font-medium">Fleet health</div>
+      <div className="mt-2 flex h-1.5 rounded-full overflow-hidden bg-zinc-800">
+        <div className="bg-emerald-500" style={{ width: `${pct(counts.green)}%` }} />
+        <div className="bg-amber-500" style={{ width: `${pct(counts.amber)}%` }} />
+        <div className="bg-rose-500" style={{ width: `${pct(counts.red)}%` }} />
+      </div>
+      <div className="flex gap-3 text-[10px] mt-1.5 muted">
+        <span>
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1" />
+          good
+        </span>
+        <span>
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 mr-1" />
+          watch {counts.amber}
+        </span>
+        <span>
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-rose-500 mr-1" />
+          retrain {counts.red}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function TimeScrubber({
+  asOf,
+  setAsOf,
+  available,
+  disabled,
+}: {
+  asOf: string;
+  setAsOf: (s: string) => void;
+  available: { min: string; max: string } | null;
+  disabled: boolean;
+}) {
+  if (!available) return null;
+  const currentDate = asOf ? new Date(asOf) : null;
+  const maxDate = new Date(available.max);
+  const minDate = new Date(available.min);
+  const maxReplay = new Date(maxDate.getTime() - 48 * 3600 * 1000);
+
+  const toInput = (d: Date) => {
+    const tzOffset = d.getTimezoneOffset() * 60000;
+    return new Date(d.getTime() - tzOffset).toISOString().slice(0, 16);
+  };
+
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+      <div className="flex items-center gap-2 text-sm">
+        <Calendar className="w-4 h-4 muted" />
+        <span className="muted">Replay as of</span>
+      </div>
+      <input
+        type="datetime-local"
+        value={currentDate ? toInput(currentDate) : ""}
+        min={toInput(minDate)}
+        max={toInput(maxReplay)}
+        disabled={disabled}
+        onChange={(e) => {
+          if (e.target.value) setAsOf(new Date(e.target.value).toISOString());
+        }}
+        className="bg-zinc-900 border border-zinc-700 rounded-md px-2 py-1.5 text-sm text-zinc-100 [color-scheme:dark] focus:border-teal-500 focus:outline-none"
+      />
+      <div className="flex gap-1">
+        {[
+          { label: "7 days ago", days: 7 },
+          { label: "14 days ago", days: 14 },
+          { label: "30 days ago", days: 30 },
+        ].map((p) => (
+          <button
+            key={p.days}
+            disabled={disabled}
+            onClick={() => {
+              const d = new Date(maxDate.getTime() - p.days * 86400000);
+              setAsOf(d.toISOString());
+            }}
+            className="text-xs px-2 py-1 rounded border border-zinc-800 hover:border-teal-700 hover:text-teal-400 muted transition-colors duration-fast disabled:opacity-50"
+          >
+            {p.label}
+          </button>
         ))}
       </div>
     </div>
   );
 }
 
-function GraphStats({ graph }: { graph: NetworkGraph }) {
-  const counts = graph.nodes.reduce<Record<string, number>>((acc, n) => {
-    acc[n.kind] = (acc[n.kind] || 0) + 1;
-    return acc;
-  }, {});
+function TierFilter({
+  active,
+  setActive,
+  counts,
+}: {
+  active: string | null;
+  setActive: (t: string | null) => void;
+  counts: Record<string, number>;
+}) {
+  const entries = Object.entries(counts);
   return (
-    <dl className="space-y-2 text-sm">
-      {Object.entries(counts).sort().map(([k, n]) => (
-        <div key={k} className="flex justify-between border-b border-zinc-800 py-1.5">
-          <dt className="muted capitalize">{k.replace("_", " ")}</dt>
-          <dd>{n}</dd>
-        </div>
+    <div className="flex gap-1 flex-wrap">
+      <Chip active={active === null} onClick={() => setActive(null)}>
+        All {entries.reduce((s, [, n]) => s + n, 0)}
+      </Chip>
+      {entries.map(([tier, n]) => (
+        <Chip key={tier} active={active === tier} onClick={() => setActive(tier)}>
+          {tier.split(" ")[0]} {n}
+        </Chip>
       ))}
-    </dl>
-  );
-}
-
-function SidePanel({ node, setRoute }: { node: GraphNode; setRoute: (r: Route) => void }) {
-  return (
-    <div>
-      <button
-        onClick={() => setRoute({ name: "home" })}
-        className="text-xs muted hover:text-white mb-3 flex items-center gap-1"
-      >
-        <ArrowLeft className="w-3 h-3" /> deselect
-      </button>
-      <h2 className="text-lg font-semibold">{node.label}</h2>
-      <p className="muted text-sm mb-4 capitalize">{node.kind.replace("_", " ")}</p>
-      <dl className="space-y-1.5 text-sm mb-5">
-        {Object.entries(node)
-          .filter(([k]) => !["id", "label", "kind"].includes(k))
-          .filter(([, v]) => v !== null && v !== undefined && v !== "")
-          .slice(0, 10)
-          .map(([k, v]) => (
-            <div key={k} className="flex justify-between gap-2">
-              <dt className="muted text-xs mt-0.5">{k}</dt>
-              <dd className="text-right max-w-[200px] truncate">{String(v)}</dd>
-            </div>
-          ))}
-      </dl>
-      {node.kind === "meter" && (
-        <button
-          className="btn-primary w-full"
-          onClick={() => setRoute({ name: "meter", msn: (node as any).msn })}
-        >
-          <Gauge className="w-4 h-4" /> View forecast
-        </button>
-      )}
-      {node.kind === "substation" && (
-        <div className="flex flex-col gap-2">
-          <button
-            className="btn-primary w-full"
-            onClick={() => setRoute({ name: "dispatch", substationId: node.id })}
-          >
-            <Activity className="w-4 h-4" /> Open dispatch
-          </button>
-          <button
-            className="btn-ghost w-full"
-            onClick={() => setRoute({ name: "commercial", substationId: node.id })}
-          >
-            <Factory className="w-4 h-4" /> Commercial brief
-          </button>
-        </div>
-      )}
     </div>
   );
 }
 
-// ────────────────────── Screen: Meter Detail ─────────────────────────────────
+function Chip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={
+        "text-xs px-2.5 py-1 rounded-full border transition-colors duration-fast " +
+        (active
+          ? "bg-teal-900/40 border-teal-700 text-teal-100"
+          : "bg-zinc-900 border-zinc-800 muted hover:text-white hover:border-zinc-700")
+      }
+    >
+      {children}
+    </button>
+  );
+}
+
+// ─── The meter tile — the visual heart of the product ──────────────────────
+
+function MeterTile({
+  meta,
+  replay,
+  onClick,
+}: {
+  meta: MeterSummary;
+  replay: MeterReplay | undefined;
+  onClick: () => void;
+}) {
+  const healthBorder = {
+    green: "border-emerald-700/50 hover:border-emerald-500",
+    amber: "border-amber-700/50 hover:border-amber-500",
+    red: "border-rose-800/50 hover:border-rose-500",
+  }[meta.health];
+  const dot = {
+    green: "bg-emerald-500",
+    amber: "bg-amber-500",
+    red: "bg-rose-500",
+  }[meta.health];
+  const tierShort = meta.tier.split(" ")[0];
+  const liveMape = replay?.mape;
+
+  return (
+    <button
+      onClick={onClick}
+      className={
+        "card text-left p-3 transition-all duration-fast hover:-translate-y-0.5 " +
+        healthBorder
+      }
+    >
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className={"w-1.5 h-1.5 rounded-full flex-shrink-0 " + dot} />
+          <span className="text-xs font-medium">{tierShort}</span>
+          <span className="text-[10px] muted truncate">· {meta.phase}</span>
+        </div>
+        <span className="text-[10px] muted">#{meta.msn.slice(-4)}</span>
+      </div>
+      <TileSparkline replay={replay} health={meta.health} />
+      <div className="flex items-baseline justify-between mt-2">
+        <div>
+          <div className="text-xl font-semibold leading-none">
+            {liveMape != null
+              ? `${liveMape.toFixed(1)}%`
+              : replay?.status === "no_actuals"
+                ? "—"
+                : "…"}
+          </div>
+          <div className="text-[10px] muted mt-0.5">
+            {liveMape != null
+              ? "error this window"
+              : replay?.status === "no_actuals"
+                ? "no actuals yet"
+                : "loading"}
+          </div>
+        </div>
+        <ChevronRight className="w-4 h-4 muted" />
+      </div>
+    </button>
+  );
+}
+
+function TileSparkline({
+  replay,
+  health,
+}: {
+  replay: MeterReplay | undefined;
+  health: string;
+}) {
+  const data = useMemo(() => {
+    if (!replay || !replay.series?.length) return [];
+    return replay.series.map((p, i) => ({ i, f: p.forecast_wh, a: p.actual_wh }));
+  }, [replay]);
+
+  const stroke =
+    { green: "#10B981", amber: "#F59E0B", red: "#EF4444" }[health] || "#0E7C7B";
+
+  if (data.length === 0) {
+    return <div className="h-14 w-full bg-zinc-950/50 rounded animate-pulse" />;
+  }
+
+  return (
+    <div className="h-14 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
+          <YAxis hide domain={["dataMin", "dataMax"]} />
+          <Line
+            dataKey="f"
+            stroke={stroke}
+            strokeWidth={1.5}
+            dot={false}
+            isAnimationActive={false}
+          />
+          <Line
+            dataKey="a"
+            stroke="#FAFAFA"
+            strokeWidth={1.2}
+            strokeDasharray="2 2"
+            dot={false}
+            isAnimationActive={false}
+            connectNulls={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+// ─── Loading / empty / error states (first-class per feedback) ─────────────
+
+function InitialLoading() {
+  return (
+    <div className="px-6 py-16 max-w-4xl mx-auto">
+      <div className="card p-8 flex items-center gap-4">
+        <Gauge className="w-8 h-8 text-teal-500 animate-pulse" />
+        <div>
+          <h1 className="text-lg font-semibold">Loading forecast fleet</h1>
+          <p className="muted text-sm">
+            Warming up the v4 engine on 42 real meters · replaying against
+            held-out actuals. Takes about 5 seconds on first load.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyTiles({
+  tierFilter,
+  reset,
+}: {
+  tierFilter: string | null;
+  reset: () => void;
+}) {
+  return (
+    <div className="card p-8 text-center">
+      <p className="muted text-sm mb-3">
+        No meters matching {tierFilter ? `"${tierFilter}"` : "your filter"}.
+      </p>
+      <button className="btn-ghost" onClick={reset}>
+        Show all meters
+      </button>
+    </div>
+  );
+}
+
+function ErrorState({ msg, retry }: { msg: string; retry: () => void }) {
+  return (
+    <div className="px-6 py-16 max-w-2xl mx-auto">
+      <div className="card p-6 border-rose-900/50 bg-rose-950/20">
+        <h2 className="text-lg font-semibold mb-1">
+          Couldn't load the forecast fleet.
+        </h2>
+        <p className="text-sm muted mb-1">
+          The backend didn't respond. Most likely the API isn't running on
+          port 8000, or the model bundles at <code>models/v4/</code> aren't on disk.
+        </p>
+        <code className="text-xs text-rose-300 block mt-2 mb-4">{msg}</code>
+        <button onClick={retry} className="btn-primary">
+          Try again
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SCREEN 2 — MeterDetail
+// ═══════════════════════════════════════════════════════════════════════════
 
 function MeterDetail({ msn, back }: { msn: string; back: () => void }) {
-  const [fc, setFc] = useState<MeterForecastResponse | null>(null);
+  const [h, setH] = useState<MeterHistoryResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    api.meterForecast(msn, 48)
-      .then(setFc)
-      .catch((e) => setErr(String(e)));
+    showcase.meterHistory(msn, undefined, 96).then(setH).catch((e) => setErr(e.message));
   }, [msn]);
 
-  const data = useMemo(() => {
-    if (!fc) return [];
-    return fc.rows.map((r, i) => ({
-      t: r.timestamp ? r.timestamp.slice(11, 16) : `${i}`,
-      forecast: r.forecast_wh,
-      low: r.confidence_low,
-      high: r.confidence_high,
-      band: r.confidence_high - r.confidence_low,
+  const chartData = useMemo(() => {
+    if (!h) return [];
+    return h.series.map((p) => ({
+      ts: new Date(p.ts).toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      forecast: p.forecast_wh,
+      actual: p.actual_wh,
+      low: p.confidence_low,
+      high: p.confidence_high,
     }));
-  }, [fc]);
+  }, [h]);
+
+  const blockBars = useMemo(() => {
+    if (!h) return [];
+    return (["night", "morning", "solar", "peak"] as const).map((b) => ({
+      block: b === "peak" ? "Peak 6-10 PM" : b.charAt(0).toUpperCase() + b.slice(1),
+      trained: h.block_mape_trained[b],
+      replay: h.block_mape[b],
+    }));
+  }, [h]);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-5">
-      <button onClick={back} className="flex items-center gap-1 muted hover:text-white text-sm">
-        <ArrowLeft className="w-4 h-4" /> back to network
+    <div className="px-6 py-5 max-w-[1400px] mx-auto">
+      <button
+        onClick={back}
+        className="flex items-center gap-1 muted hover:text-white text-sm mb-3"
+      >
+        <ArrowLeft className="w-4 h-4" /> Back to fleet
       </button>
-      <h1 className="text-2xl font-semibold">Meter {msn}</h1>
+
       {err && (
-        <div className="card p-4 border-red-900 bg-red-950/30 text-red-300 text-sm">
-          <b>predict() failed.</b> {err}. Synthesize a forecast at the
-          substation aggregate, or ensure <code>models/v4/{msn}.joblib</code> exists
-          and the raw parquets under <code>data/</code> are loaded.
+        <div className="card p-4 border-rose-900/50 bg-rose-950/20 text-sm">
+          <b>Couldn't load this meter's history.</b>{" "}
+          <span className="text-rose-300">{err}</span>
         </div>
       )}
-      {fc && (
+
+      {!h && !err && (
+        <div className="card p-8 text-center muted text-sm">
+          Loading forecast history…
+        </div>
+      )}
+
+      {h && (
         <>
-          <div className="card p-4">
-            <h2 className="text-sm muted uppercase tracking-wider mb-2">
-              48-interval forecast (Wh per 30-min block)
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 mb-4">
+            <div>
+              <h1 className="text-2xl font-semibold">
+                {h.tier.split(" ")[0]} meter · forecast vs actual
+              </h1>
+              <p className="muted text-sm mt-1">
+                <code>MSN {h.msn}</code> · {h.tier} · {h.phase} · replay as of{" "}
+                {new Date(h.as_of).toLocaleString()}
+              </p>
+            </div>
+            <div className="flex gap-4">
+              <div className="text-right">
+                <div className="text-[10px] muted uppercase tracking-wider">
+                  Training
+                </div>
+                <div className="text-2xl font-semibold">
+                  {h.holdout_mape_trained.toFixed(2)}%
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-[10px] muted uppercase tracking-wider">
+                  This window
+                </div>
+                <div className="text-2xl font-semibold text-teal-400">
+                  {h.replay_mape_actual != null
+                    ? `${h.replay_mape_actual.toFixed(2)}%`
+                    : "—"}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="card p-4 mb-5">
+            <h2 className="text-sm muted uppercase tracking-wider mb-3">
+              48-hour overlay · white dashed line is the truth
             </h2>
-            <ResponsiveContainer width="100%" height={320}>
-              <AreaChart data={data}>
+            <ResponsiveContainer width="100%" height={340}>
+              <ComposedChart data={chartData}>
                 <defs>
-                  <linearGradient id="band" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0%" stopColor="#0E7C7B" stopOpacity={0.3} />
+                  <linearGradient id="bandFill" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stopColor="#0E7C7B" stopOpacity={0.35} />
                     <stop offset="100%" stopColor="#0E7C7B" stopOpacity={0.05} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid stroke="#27272A" strokeDasharray="3 3" />
-                <XAxis dataKey="t" stroke="#71717A" fontSize={11} />
-                <YAxis stroke="#71717A" fontSize={11} />
+                <XAxis
+                  dataKey="ts"
+                  stroke="#71717A"
+                  fontSize={10}
+                  interval="preserveStartEnd"
+                  minTickGap={60}
+                />
+                <YAxis
+                  stroke="#71717A"
+                  fontSize={10}
+                  tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`}
+                />
                 <Tooltip
                   contentStyle={{ background: "#18181B", border: "1px solid #27272A" }}
+                  formatter={(v: any, name: any) => [
+                    typeof v === "number" ? `${v.toFixed(0)} Wh` : v,
+                    name === "forecast"
+                      ? "Forecast"
+                      : name === "actual"
+                        ? "Actual"
+                        : name,
+                  ]}
                 />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
                 <Area
                   type="monotone"
                   dataKey="high"
                   stroke="none"
-                  fill="url(#band)"
-                  stackId="a"
+                  fill="url(#bandFill)"
+                  name="Confidence band"
                 />
-                <Line type="monotone" dataKey="forecast" stroke="#0E7C7B" strokeWidth={2} dot={false} />
-              </AreaChart>
+                <Line
+                  type="monotone"
+                  dataKey="forecast"
+                  stroke="#0E7C7B"
+                  strokeWidth={2}
+                  dot={false}
+                  isAnimationActive={false}
+                  name="Forecast"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="actual"
+                  stroke="#FAFAFA"
+                  strokeWidth={1.5}
+                  strokeDasharray="3 3"
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                  name="Actual"
+                />
+              </ComposedChart>
             </ResponsiveContainer>
-          </div>
-          <div className="text-xs muted">
-            Model version <code>{fc.model_version}</code> · as of {fc.as_of}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ────────────────────── Screen: Dispatch Console ─────────────────────────────
-
-function DispatchConsole({
-  substationId,
-  goCommercial,
-  back,
-}: {
-  substationId: string;
-  goCommercial: () => void;
-  back: () => void;
-}) {
-  const [d, setD] = useState<DispatchResponse | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    api.substationDispatch(substationId).then(setD).catch((e) => setErr(String(e)));
-  }, [substationId]);
-
-  const chartData = useMemo(() => {
-    if (!d) return [];
-    return d.schedule.map((r) => ({
-      t: r.timestamp.slice(11, 16),
-      demand: r.demand_kwh,
-      grid: r.grid_import_kwh,
-      charge: r.bess_charge_kwh,
-      discharge: r.bess_discharge_kwh,
-      soc: r.soc_pct,
-      price: r.iex_price_inr,
-    }));
-  }, [d]);
-
-  return (
-    <div className="p-6 max-w-7xl mx-auto space-y-5">
-      <div className="flex items-center justify-between">
-        <button onClick={back} className="flex items-center gap-1 muted hover:text-white text-sm">
-          <ArrowLeft className="w-4 h-4" /> network
-        </button>
-        <button onClick={goCommercial} className="btn-ghost">
-          <Factory className="w-4 h-4" /> Commercial brief
-        </button>
-      </div>
-      <h1 className="text-2xl font-semibold">Dispatch · {substationId}</h1>
-      {err && <ErrorCard msg={err} />}
-      {d && (
-        <>
-          <div className="grid grid-cols-4 gap-3">
-            <Stat label="Net benefit (48h)" value={`₹${Math.round(d.totals.net_benefit_inr).toLocaleString()}`} />
-            <Stat label="Peak kVA" value={`${d.totals.peak_kva.toFixed(0)}`} />
-            <Stat label="Cycles" value={d.totals.cycles.toFixed(2)} />
-            <Stat label="Solver" value={d.solver_status} />
-          </div>
-          <div className="grid grid-cols-[2fr_1fr] gap-5">
-            <div className="card p-4">
-              <h2 className="text-sm muted uppercase tracking-wider mb-2">
-                48h × 15-min schedule — grid import, BESS charge/discharge, SOC
-              </h2>
-              <ResponsiveContainer width="100%" height={280}>
-                <LineChart data={chartData}>
-                  <CartesianGrid stroke="#27272A" strokeDasharray="3 3" />
-                  <XAxis dataKey="t" stroke="#71717A" fontSize={10} interval={15} />
-                  <YAxis yAxisId="l" stroke="#71717A" fontSize={10} />
-                  <YAxis yAxisId="r" orientation="right" stroke="#FB923C" fontSize={10} domain={[0, 100]} />
-                  <Tooltip contentStyle={{ background: "#18181B", border: "1px solid #27272A" }} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Line yAxisId="l" type="stepAfter" dataKey="grid" stroke="#94A3B8" dot={false} strokeWidth={1.3} />
-                  <Line yAxisId="l" type="stepAfter" dataKey="charge" stroke="#38BDF8" dot={false} strokeWidth={1.3} />
-                  <Line yAxisId="l" type="stepAfter" dataKey="discharge" stroke="#F472B6" dot={false} strokeWidth={1.3} />
-                  <Line yAxisId="r" type="monotone" dataKey="soc" stroke="#FB923C" dot={false} strokeWidth={2} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="card p-4 overflow-auto max-h-[360px]">
-              <h2 className="text-sm muted uppercase tracking-wider mb-2">Audit column</h2>
-              <ul className="space-y-2 text-[13px]">
-                {d.schedule
-                  .filter((r) => r.action !== "hold")
-                  .slice(0, 30)
-                  .map((r) => (
-                    <li key={r.timestamp} className="border-l-2 border-teal-500 pl-2 py-0.5">
-                      <code className="text-zinc-200">{r.audit_string}</code>
-                    </li>
-                  ))}
-              </ul>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="card p-3">
-      <div className="text-xs muted uppercase tracking-wider">{label}</div>
-      <div className="text-xl font-semibold mt-1">{value}</div>
-    </div>
-  );
-}
-
-function ErrorCard({ msg }: { msg: string }) {
-  return (
-    <div className="card p-4 border-red-900 bg-red-950/30 text-red-300 text-sm">
-      <b>Backend error.</b> {msg}
-    </div>
-  );
-}
-
-// ────────────────────── Screen: Commercial Brief ─────────────────────────────
-
-function CommercialBrief({ substationId, back }: { substationId: string; back: () => void }) {
-  const [c, setC] = useState<CommercialResponse | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [quote, setQuote] = useState<FLSQuote | null>(null);
-  const [buyerKw, setBuyerKw] = useState<number>(500);
-
-  useEffect(() => {
-    api.substationCommercial(substationId).then(setC).catch((e) => setErr(String(e)));
-  }, [substationId]);
-
-  const onQuote = async () => {
-    setQuote(
-      await api.substationFlsQuote(substationId, {
-        contract_id: `FLS-${substationId}-${Date.now()}`,
-        buyer_kw: buyerKw,
-        window_start: "18:00",
-        window_end: "22:00",
-      })
-    );
-  };
-
-  const heatRows = useMemo(() => {
-    if (!c) return [];
-    return c.heatmap.capacities_mwh.flatMap((cap, i) =>
-      c.heatmap.durations_h.map((dur, j) => ({
-        cap, dur,
-        irr: c.heatmap.irr_pct[i][j],
-        payback: c.heatmap.payback_years[i][j],
-      }))
-    );
-  }, [c]);
-
-  return (
-    <div className="p-6 max-w-6xl mx-auto space-y-5">
-      <button onClick={back} className="flex items-center gap-1 muted hover:text-white text-sm">
-        <ArrowLeft className="w-4 h-4" /> dispatch
-      </button>
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Commercial brief · {substationId}</h1>
-        <a
-          href={api.substationBriefUrl(substationId)}
-          target="_blank" rel="noreferrer"
-          className="btn-primary"
-        >
-          <Download className="w-4 h-4" /> Export PDF (print view)
-        </a>
-      </div>
-      {err && <ErrorCard msg={err} />}
-      {c && (
-        <>
-          <div className="grid grid-cols-4 gap-3">
-            <Stat label="Today net" value={`₹${Math.round(c.daily_net_benefit_inr).toLocaleString()}`} />
-            <Stat label="Annual (proj.)" value={`₹${(c.annual_net_benefit_inr / 1e5).toFixed(1)} L`} />
-            <Stat label="IRR (ref)" value={`${c.reference.irr_pct.toFixed(1)}%`} />
-            <Stat label="Payback" value={`${c.reference.payback_years.toFixed(1)} yr`} />
           </div>
 
           <div className="card p-4">
             <h2 className="text-sm muted uppercase tracking-wider mb-3">
-              IRR heatmap — BESS capacity × duration
+              Accuracy by time of day · training vs this window
             </h2>
-            <div className="overflow-auto">
-              <table className="text-sm">
-                <thead>
-                  <tr className="muted">
-                    <th className="px-3 py-1.5 text-left">MWh \ Hours</th>
-                    {c.heatmap.durations_h.map((d) => (
-                      <th key={d} className="px-3 py-1.5">{d}h</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {c.heatmap.capacities_mwh.map((cap, i) => (
-                    <tr key={cap}>
-                      <td className="px-3 py-1.5 muted">{cap} MWh</td>
-                      {c.heatmap.durations_h.map((_, j) => {
-                        const irr = c.heatmap.irr_pct[i][j];
-                        const bg = irr > 20 ? "bg-emerald-900/50"
-                          : irr > 12 ? "bg-emerald-900/25"
-                          : irr > 0 ? "bg-zinc-900"
-                          : "bg-red-950/40";
-                        return (
-                          <td key={j} className={`px-3 py-1.5 text-center ${bg}`}>
-                            <div className="font-semibold">{isFinite(irr) ? `${irr.toFixed(1)}%` : "—"}</div>
-                            <div className="text-[10px] muted">
-                              {c.heatmap.payback_years[i][j].toFixed(1)}y
-                            </div>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="card p-4">
-            <h2 className="text-sm muted uppercase tracking-wider mb-3">FLS quote generator</h2>
-            <div className="flex items-end gap-3 mb-4">
-              <label className="text-sm">
-                <div className="muted text-xs mb-1">Buyer kW</div>
-                <input
-                  type="number"
-                  value={buyerKw}
-                  onChange={(e) => setBuyerKw(Number(e.target.value))}
-                  className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 w-28"
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={blockBars}>
+                <CartesianGrid stroke="#27272A" strokeDasharray="3 3" />
+                <XAxis dataKey="block" stroke="#71717A" fontSize={11} />
+                <YAxis stroke="#71717A" fontSize={11} unit="%" />
+                <Tooltip
+                  contentStyle={{ background: "#18181B", border: "1px solid #27272A" }}
+                  formatter={(v: any) =>
+                    typeof v === "number" ? `${v.toFixed(2)}%` : v
+                  }
                 />
-              </label>
-              <div className="text-xs muted pb-1.5">
-                Window: 18:00 – 22:00 weekdays, 12-month tenor
-              </div>
-              <button className="btn-primary" onClick={onQuote}>
-                Generate quote
-              </button>
-            </div>
-            {quote && (
-              <div className="grid grid-cols-3 gap-3">
-                <Stat label="Offered ₹/kWh" value={`₹${quote.offered_price_inr_per_kwh}`} />
-                <Stat label="Firmness" value={`${quote.firmness_pct}%`} />
-                <Stat label="Peak MAPE" value={`${quote.underlying_mape_pct}%`} />
-                <div className="col-span-3 text-sm muted">{quote.rationale}</div>
-              </div>
-            )}
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar dataKey="trained" fill="#27272A" name="Trained" />
+                <Bar dataKey="replay" fill="#0E7C7B" name="This window" />
+              </BarChart>
+            </ResponsiveContainer>
+            <p className="text-xs muted mt-3">
+              Peak block (6–10 PM) is the commercial window — tight accuracy here
+              backs firm-power contracts.
+            </p>
           </div>
         </>
       )}
@@ -690,82 +885,127 @@ function CommercialBrief({ substationId, back }: { substationId: string; back: (
   );
 }
 
-// ────────────────────── Screen: Portfolio ────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// SCREEN 3 — Network (placeholder; demoted)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function NetworkPlaceholder({ back }: { back: () => void }) {
+  return (
+    <div className="px-6 py-16 max-w-2xl mx-auto">
+      <button
+        onClick={back}
+        className="flex items-center gap-1 muted hover:text-white text-sm mb-4"
+      >
+        <ArrowLeft className="w-4 h-4" /> Back
+      </button>
+      <div className="card p-8">
+        <NetworkIcon className="w-8 h-8 text-teal-500 mb-3" />
+        <h1 className="text-xl font-semibold mb-2">Network view</h1>
+        <p className="muted text-sm mb-4">
+          The substation-meter-BESS graph lives here — useful for dispatch
+          simulation; less useful for the core accuracy proof, so it's moved
+          out of the primary path.
+        </p>
+        <p className="text-xs muted">
+          Coming in v3: embedded into the Accuracy view as an optional "see by
+          substation" lens.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SCREEN 4 — Portfolio
+// ═══════════════════════════════════════════════════════════════════════════
 
 function PortfolioView({ back }: { back: () => void }) {
-  const [p, setP] = useState<Portfolio | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [summary, setSummary] = useState<FleetSummary | null>(null);
+  const [meters, setMeters] = useState<MeterSummary[]>([]);
 
   useEffect(() => {
-    api.portfolio().then(setP).catch((e) => setErr(String(e)));
+    Promise.all([showcase.fleetSummary(), showcase.meters()])
+      .then(([s, m]) => {
+        setSummary(s);
+        setMeters(m.meters);
+      })
+      .catch(() => {});
   }, []);
 
-  const healthData = useMemo(() => {
-    if (!p) return [];
-    return [
-      { name: "green", n: p.meter_health.green, fill: "#10B981" },
-      { name: "amber", n: p.meter_health.amber, fill: "#F59E0B" },
-      { name: "red", n: p.meter_health.red, fill: "#EF4444" },
-    ];
-  }, [p]);
-
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-5">
-      <button onClick={back} className="flex items-center gap-1 muted hover:text-white text-sm">
-        <ArrowLeft className="w-4 h-4" /> network
+    <div className="px-6 py-5 max-w-6xl mx-auto">
+      <button
+        onClick={back}
+        className="flex items-center gap-1 muted hover:text-white text-sm mb-3"
+      >
+        <ArrowLeft className="w-4 h-4" /> Back
       </button>
-      <h1 className="text-2xl font-semibold">Portfolio</h1>
-      {err && <ErrorCard msg={err} />}
-      {p && (
-        <>
-          <div className="grid grid-cols-4 gap-3">
-            <Stat label="Substations" value={`${p.n_substations}`} />
-            <Stat label="Meters" value={`${p.n_meters}`} />
-            <Stat label="BESS units" value={`${p.n_bess}`} />
-            <Stat label="Model" value={p.model_version} />
-          </div>
-          <div className="grid grid-cols-2 gap-5">
-            <div className="card p-4">
-              <h2 className="text-sm muted uppercase tracking-wider mb-2">Meter health (MAPE)</h2>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={healthData}>
-                  <CartesianGrid stroke="#27272A" strokeDasharray="3 3" />
-                  <XAxis dataKey="name" stroke="#71717A" />
-                  <YAxis stroke="#71717A" />
-                  <Tooltip contentStyle={{ background: "#18181B", border: "1px solid #27272A" }} />
-                  <Bar dataKey="n" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="card p-4">
-              <h2 className="text-sm muted uppercase tracking-wider mb-2">Substations</h2>
-              <table className="text-sm w-full">
-                <thead className="muted text-xs">
-                  <tr>
-                    <th className="text-left py-1">Substation</th>
-                    <th className="text-right py-1">Meters</th>
-                    <th className="text-right py-1">BESS</th>
-                    <th className="text-right py-1">₹/kWh landed</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {p.substations.map((s) => (
-                    <tr key={s.id} className="border-t border-zinc-800">
-                      <td className="py-1.5">
-                        <div>{s.label}</div>
-                        <code className="text-[10px] muted">{s.id}</code>
-                      </td>
-                      <td className="text-right">{s.n_meters}</td>
-                      <td className="text-right">{s.n_bess}</td>
-                      <td className="text-right">₹{s.landed_cost_inr_per_kwh.toFixed(2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
+      <h1 className="text-2xl font-semibold mb-5">Meter fleet</h1>
+      {summary && (
+        <div className="grid grid-cols-3 gap-3 mb-5">
+          <BigStat value={String(summary.n_meters)} label="Meters" />
+          <BigStat
+            value={`${summary.mean_mape_pct.toFixed(2)}%`}
+            label="Mean accuracy error"
+          />
+          <BigStat
+            value={`${summary.health_counts.green}/${summary.n_meters}`}
+            label="Under 8% error"
+          />
+        </div>
       )}
+      <div className="card overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-zinc-900/60 text-xs muted uppercase tracking-wider">
+            <tr>
+              <th className="px-4 py-2 text-left">Meter</th>
+              <th className="px-4 py-2 text-left">Tier</th>
+              <th className="px-4 py-2 text-right">Mean error</th>
+              <th className="px-4 py-2 text-right">Peak error</th>
+              <th className="px-4 py-2 text-left">Health</th>
+            </tr>
+          </thead>
+          <tbody>
+            {meters.map((m) => (
+              <tr
+                key={m.msn}
+                className="border-t border-zinc-900 hover:bg-zinc-900/40 transition-colors duration-fast"
+              >
+                <td className="px-4 py-2">
+                  <code className="text-zinc-300">{m.msn}</code>
+                </td>
+                <td className="px-4 py-2 muted">{m.tier}</td>
+                <td className="px-4 py-2 text-right">{m.holdout_mape.toFixed(2)}%</td>
+                <td className="px-4 py-2 text-right">{m.peak_mape.toFixed(2)}%</td>
+                <td className="px-4 py-2">
+                  <span
+                    className={
+                      "chip " +
+                      (m.health === "green"
+                        ? "bg-emerald-900/40 text-emerald-300"
+                        : m.health === "amber"
+                          ? "bg-amber-900/40 text-amber-300"
+                          : "bg-rose-900/40 text-rose-300")
+                    }
+                  >
+                    <span
+                      className={
+                        "w-1.5 h-1.5 rounded-full " +
+                        (m.health === "green"
+                          ? "bg-emerald-500"
+                          : m.health === "amber"
+                            ? "bg-amber-500"
+                            : "bg-rose-500")
+                      }
+                    />
+                    {m.health}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

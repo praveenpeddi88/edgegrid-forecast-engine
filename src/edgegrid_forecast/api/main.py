@@ -53,7 +53,9 @@ app.add_middleware(
 # Dispatch Console prototype routers (graph-centric endpoints).
 # Additive — preserves legacy consumer-centric endpoints below.
 from .routers import router as prototype_router  # noqa: E402
+from .showcase import router as showcase_router  # noqa: E402
 app.include_router(prototype_router)
+app.include_router(showcase_router)
 
 # ─── Request/Response Models ─────────────────────────────────────────────────
 
