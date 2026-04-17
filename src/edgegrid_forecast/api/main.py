@@ -50,6 +50,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Dispatch Console prototype routers (graph-centric endpoints).
+# Additive — preserves legacy consumer-centric endpoints below.
+from .routers import router as prototype_router  # noqa: E402
+app.include_router(prototype_router)
+
 # ─── Request/Response Models ─────────────────────────────────────────────────
 
 class DemandForecastRequest(BaseModel):

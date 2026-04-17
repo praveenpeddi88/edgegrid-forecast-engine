@@ -48,3 +48,9 @@ Thumbs.db
 .pytest_cache/
 htmlcov/
 .coverage
+
+# Frontend (Dispatch Console prototype)
+node_modules/
+frontend/dist/
+.vite/
+*.tsbuildinfo

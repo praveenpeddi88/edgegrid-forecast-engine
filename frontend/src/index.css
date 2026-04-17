@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+
+/* Subtle 1px borders, density-first — spec §Part IV design system. */
+.card { @apply bg-zinc-900 border border-zinc-800 rounded-lg; }
+.muted { @apply text-zinc-400; }
+.chip { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium; }
+.btn { @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors duration-fast; }
+.btn-primary { @apply btn bg-teal-500 hover:bg-teal-600 text-white; }
+.btn-ghost { @apply btn bg-zinc-800 hover:bg-zinc-700 text-zinc-100; }
