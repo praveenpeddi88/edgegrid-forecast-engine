@@ -37,6 +37,15 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from edgegrid_forecast.inference._scenarios import (
+    resolve_scenario,
+    scenario_metadata,
+)
+from edgegrid_forecast.inference._derived import (
+    derive as derive_load_metrics,
+    diversity_factor,
+)
+
 router = APIRouter(prefix="/v5", tags=["v5-forecast"])
 
 
@@ -137,14 +146,42 @@ class PredictRequest(BaseModel):
         description="batch = single-shot LightGBM predict (fast, ideal <=48 steps). "
                     "recursive = one-step-ahead autoregressive (accurate longer horizons).",
     )
+    scenario: Optional[str] = Field(
+        default=None,
+        description="CEA scenario filter: pessimistic/bau/optimistic "
+                    "(or p10/p90/central). If None, all three are returned. (W2)",
+    )
 
 
 class PredictRow(BaseModel):
+    """Per-timestamp forecast row.
+
+    Fields are dual-labelled: the raw statistical names (`q10_wh`, `forecast_wh`,
+    `q90_wh`) plus the CEA three-scenario commercial names
+    (`pessimistic_wh`, `bau_wh`, `optimistic_wh`). They carry the same numbers —
+    callers should pick whichever naming convention fits their system.
+    """
     ts: str
+    # Statistical labels (backward-compatible with v5.s1.0 clients)
     forecast_wh: float
     q10_wh: float
     q90_wh: float
+    # CEA three-scenario commercial labels (W2)
+    pessimistic_wh: float
+    bau_wh: float
+    optimistic_wh: float
     block_label: str
+
+
+class DerivedMetricsBlock(BaseModel):
+    """Per-scenario derived load metrics (W4).
+
+    Computed over the requested horizon for each of the three CEA scenarios.
+    All values are kW / kWh / hours; load_factor is a ratio in [0, 1].
+    """
+    pessimistic: dict
+    bau: dict
+    optimistic: dict
 
 
 class PredictResponse(BaseModel):
@@ -157,6 +194,12 @@ class PredictResponse(BaseModel):
     holdout_mape: Optional[float]
     historical_block_mape: dict
     predictions: list[PredictRow]
+    # CEA three-scenario metadata (W2). Describes the drivers each scenario
+    # assumes so commercial + regulatory users can reproduce the narrative.
+    scenarios: dict = Field(default_factory=scenario_metadata)
+    # CEA-aligned derived load metrics (W4): peak_kw, average_kw, load_factor,
+    # total_energy_kwh, peak_ts, horizon_hours — one block per scenario.
+    derived: Optional[DerivedMetricsBlock] = None
 
 
 class FleetPredictRequest(BaseModel):
@@ -208,6 +251,25 @@ def manifest():
     return {"n_meters": len(_load_manifest()), "models": _load_manifest()}
 
 
+@router.get("/scenarios")
+def scenarios():
+    """Return the CEA three-scenario narratives (W2).
+
+    Stable payload suitable for exec dashboards + regulatory filing footnotes.
+    The three scenarios map to the v5 quantile heads as:
+    pessimistic=q10, bau=mean, optimistic=q90.
+    """
+    return {
+        "framework": "CEA 19th EPS three-scenario",
+        "mapping": {
+            "pessimistic": "q10 (low-load)",
+            "bau": "mean (central)",
+            "optimistic": "q90 (high-load)",
+        },
+        "scenarios": scenario_metadata(),
+    }
+
+
 @router.get("/meters")
 def meters():
     m = _load_manifest()
@@ -225,16 +287,47 @@ def meters():
 
 
 def _format_predictions(result_df: pd.DataFrame, msn: str, row: dict,
-                        as_of: str, horizon_steps: int, mode: str) -> PredictResponse:
+                        as_of: str, horizon_steps: int, mode: str,
+                        scenario: Optional[str] = None) -> PredictResponse:
+    """Format the inference frame as a PredictResponse.
+
+    Statistical q10/mean/q90 are carried through; CEA three-scenario aliases
+    (pessimistic/bau/optimistic) are populated from the same numbers. If
+    `scenario` is given, the per-row forecast_wh/bau_wh is *also* rewritten
+    to the chosen scenario so downstream consumers can ignore the quantile
+    fields entirely.
+    """
+    scenario_key = resolve_scenario(scenario)
     preds = []
     for ts, r in result_df.iterrows():
+        mean_v = float(r["forecast_wh"])
+        lo = float(r["confidence_low"])
+        hi = float(r["confidence_high"])
         preds.append(PredictRow(
             ts=ts.isoformat(),
-            forecast_wh=float(r["forecast_wh"]),
-            q10_wh=float(r["confidence_low"]),
-            q90_wh=float(r["confidence_high"]),
+            forecast_wh=mean_v,
+            q10_wh=lo,
+            q90_wh=hi,
+            pessimistic_wh=lo,
+            bau_wh=mean_v,
+            optimistic_wh=hi,
             block_label=str(r.get("block_label", "")),
         ))
+
+    meta = scenario_metadata()
+    if scenario_key is not None:
+        # When a specific scenario is requested, collapse metadata to just
+        # that one so clients can't accidentally render the wrong narrative.
+        meta = {scenario_key: meta[scenario_key]}
+
+    # W4: derived load metrics per scenario (peak_kw, load_factor, …)
+    ts_index = pd.DatetimeIndex(result_df.index)
+    derived_block = DerivedMetricsBlock(
+        pessimistic=derive_load_metrics(result_df["confidence_low"], ts_index).as_dict(),
+        bau=derive_load_metrics(result_df["forecast_wh"], ts_index).as_dict(),
+        optimistic=derive_load_metrics(result_df["confidence_high"], ts_index).as_dict(),
+    )
+
     return PredictResponse(
         msn=msn,
         tier=row.get("tier"),
@@ -245,6 +338,8 @@ def _format_predictions(result_df: pd.DataFrame, msn: str, row: dict,
         holdout_mape=row.get("holdout_mape"),
         historical_block_mape=row.get("historical_block_mape", {}),
         predictions=preds,
+        scenarios=meta,
+        derived=derived_block,
     )
 
 
@@ -337,8 +432,12 @@ def predict(req: PredictRequest):
     if result.empty:
         raise HTTPException(500, "Predictor returned empty frame")
 
-    return _format_predictions(result, req.msn, row, as_of_ts.isoformat(),
-                               req.horizon_steps, req.mode)
+    try:
+        return _format_predictions(result, req.msn, row, as_of_ts.isoformat(),
+                                   req.horizon_steps, req.mode,
+                                   scenario=req.scenario)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @router.post("/predict/fleet")
@@ -410,8 +509,18 @@ def apr_may_forecast(
                           description="A=seasonal_anchor, B=v4_batch, "
                                       "C=v5_batch_feb12, D=ensemble_blend"),
     msn: Optional[str] = Query(None),
+    scenario: Optional[str] = Query(
+        None,
+        description="CEA scenario filter: pessimistic/bau/optimistic "
+                    "(or p10/p90/central). (W2)",
+    ),
 ):
-    """Return the pre-built 4-strategy forward forecast (Apr 21 → May 21 2026)."""
+    """Return the pre-built 4-strategy forward forecast (Apr 21 → May 21 2026).
+
+    When the underlying parquet carries `q10_wh`/`q90_wh`, those are exposed
+    under the CEA scenario aliases (pessimistic_wh / bau_wh / optimistic_wh).
+    Passing `scenario=` filters the payload to a single commercial view.
+    """
     strategy_map = {
         "A": FORECAST_ARTIFACT_DIR / "strategy_A.parquet",
         "B": FORECAST_ARTIFACT_DIR / "strategy_B.parquet",
@@ -430,11 +539,117 @@ def apr_may_forecast(
         df = df[df["meter_id"] == msn]
         if df.empty:
             raise HTTPException(404, f"msn={msn} not in strategy {strategy}")
+
+    # W2: add scenario aliases when quantile columns are present
+    try:
+        scenario_key = resolve_scenario(scenario)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    fcol = next((c for c in ("forecast_wh", "yhat", "demand_wh") if c in df.columns), None)
+    locol = next((c for c in ("q10_wh", "confidence_low") if c in df.columns), None)
+    hicol = next((c for c in ("q90_wh", "confidence_high") if c in df.columns), None)
+    if fcol is not None:
+        df = df.assign(bau_wh=df[fcol].astype(float))
+    if locol is not None:
+        df = df.assign(pessimistic_wh=df[locol].astype(float))
+    if hicol is not None:
+        df = df.assign(optimistic_wh=df[hicol].astype(float))
+
+    if scenario_key is not None:
+        # Collapse to the chosen scenario's single energy column for simpler
+        # consumption from commercial dashboards.
+        col = {"pessimistic": "pessimistic_wh", "bau": "bau_wh",
+               "optimistic": "optimistic_wh"}[scenario_key]
+        if col not in df.columns:
+            raise HTTPException(
+                404,
+                f"Strategy {strategy} artifact has no quantile column for "
+                f"scenario='{scenario_key}'. Regenerate with v5.s1.1+ pipeline.",
+            )
+        keep = [c for c in ("meter_id", "ts") if c in df.columns] + [col]
+        df = df[keep].rename(columns={col: "energy_wh"})
+
     df = df.head(2880)  # cap to avoid massive payloads; 2 meters worth of 30-min slots
+    meta = scenario_metadata()
+    if scenario_key is not None:
+        meta = {scenario_key: meta[scenario_key]}
     return {
         "strategy": strategy,
+        "scenario": scenario_key,
         "n_rows": len(df),
         "rows": df.assign(ts=df["ts"].astype(str)).to_dict(orient="records"),
+        "scenarios": meta,
+    }
+
+
+@router.post("/fleet/peak")
+def fleet_peak(req: FleetPredictRequest):
+    """Compute the coincident fleet peak + diversity factor across meters (W4).
+
+    Runs the batch predictor over the selected meters for the given horizon,
+    then reports:
+    - sum_individual_peaks_kw : Σ per-meter peak across the horizon
+    - coincident_peak_kw      : max-over-time of Σ meter demand (worst feeder stress)
+    - diversity_factor        : sum / coincident (≥ 1; higher = less coincident)
+    - per_meter               : individual peak + load-factor breakdown
+
+    Uses the BAU (mean) scenario for each meter. For P10/P90 peaks, call each
+    meter's /v5/predict and aggregate client-side — keeps this endpoint simple.
+    """
+    manifest = _load_manifest()
+    ms = req.msns or [r["msn"] for r in manifest]
+    per_meter: dict[str, pd.Series] = {}
+    per_meter_report = []
+    errors = []
+    for msn in ms:
+        sub = PredictRequest(
+            msn=msn,
+            as_of=req.as_of,
+            horizon_steps=req.horizon_steps,
+            mode="batch",
+        )
+        try:
+            p = predict(sub)
+        except HTTPException as e:
+            errors.append({"msn": msn, "detail": str(e.detail)})
+            continue
+        ts_idx = pd.DatetimeIndex([pd.Timestamp(r.ts) for r in p.predictions])
+        wh = pd.Series([r.bau_wh for r in p.predictions], index=ts_idx)
+        per_meter[msn] = wh
+        if p.derived is not None:
+            per_meter_report.append({"msn": msn, **p.derived.bau})
+
+    if not per_meter:
+        return {"n_meters": 0, "errors": errors, "coincident_peak_kw": 0.0,
+                "sum_individual_peaks_kw": 0.0, "diversity_factor": 0.0,
+                "per_meter": [], "scenarios": scenario_metadata()}
+
+    # Align onto common index
+    idx = sorted(set().union(*(s.index for s in per_meter.values())))
+    kw_mat = pd.DataFrame({
+        m: s.reindex(idx).fillna(0.0) * (2.0 / 1000.0)
+        for m, s in per_meter.items()
+    })
+    sum_indiv = float(kw_mat.max(axis=0).sum())
+    coincident = float(kw_mat.sum(axis=1).max())
+    coincident_ts = (
+        pd.Timestamp(idx[int(np.argmax(kw_mat.sum(axis=1).values))]).isoformat()
+        if coincident > 0 else ""
+    )
+    df_val = diversity_factor(per_meter)
+
+    return {
+        "as_of": req.as_of,
+        "horizon_steps": req.horizon_steps,
+        "n_meters": len(per_meter),
+        "sum_individual_peaks_kw": round(sum_indiv, 3),
+        "coincident_peak_kw": round(coincident, 3),
+        "coincident_peak_ts": coincident_ts,
+        "diversity_factor": round(df_val, 4),
+        "per_meter": per_meter_report,
+        "errors": errors,
+        "scenarios": scenario_metadata(),
     }
 
 

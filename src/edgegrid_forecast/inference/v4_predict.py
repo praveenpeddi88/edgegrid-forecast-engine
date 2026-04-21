@@ -64,7 +64,7 @@ from ._features import (
 )
 
 
-MODEL_VERSION = "v4.s1.0"  # bump on any training-recipe change
+MODEL_VERSION = "v4.s1.0"  # v4 is legacy; CEA features land in v5 only. v4 bundles remain schema-compatible: extra feature columns (hdd_21/cdd_21…) are dropped at inference via bundle.selected_features.
 
 _MODEL_BUNDLE_SCHEMA = {
     "msn":                    "str",

@@ -80,7 +80,7 @@ from ..inference._features import (
     load_meter_data,
 )
 
-VERSION = "v5.s1.0"
+VERSION = "v5.s1.1"  # v5.s1.1: CEA-canonical HDD/CDD at 21°C (W1)
 STRATEGY = "S1"
 DEFAULT_TRAIN_CUTOFF = pd.Timestamp("2026-02-12T15:00:00")  # end of verified window
 MODELS_ROOT = Path(__file__).resolve().parents[3] / "models" / "v5"

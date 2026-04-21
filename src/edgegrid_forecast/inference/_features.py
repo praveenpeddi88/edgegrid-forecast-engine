@@ -294,6 +294,24 @@ def build_features_v4_s1(
     df["hour_x_temp"] = df["hour"] * df["temperature"] / 100
     df["peak_x_temp"] = ((df["hour"] >= 12) & (df["hour"] <= 17)).astype(int) * df["temperature"]
 
+    # ── CEA-canonical HDD/CDD at 21°C threshold (W1) ──
+    # Per CEA 19th EPS / MoP 2024 Guidelines, base temperature = 21°C.
+    # HDD and CDD at this threshold are the statutory load-temperature sensitivity
+    # features. We keep the existing 18°C/25°C legacy features so the screener can
+    # compare; in practice the 21°C-based features tend to dominate India-wide.
+    # See docs/V5_CEA_ALIGNMENT.md section W1 for the rationale.
+    df["hdd_21"] = (21.0 - df["temperature"]).clip(lower=0)
+    df["cdd_21"] = (df["temperature"] - 21.0).clip(lower=0)
+    # Accumulated CDD captures multi-day heat-wave pressure on AC demand:
+    # one 32°C day is load-linear, three in a row is super-linear because
+    # buildings & inverter-AC thermal mass haven't recovered overnight.
+    df["cdd_21_rmean_48"]  = df["cdd_21"].shift(1).rolling(48,  min_periods=6).mean()   # 24h
+    df["cdd_21_rmean_336"] = df["cdd_21"].shift(1).rolling(336, min_periods=48).mean()  # 7d
+    # Interactions: CDD × hour-of-day (catches evening AC ramp post-4pm) and
+    # CDD during the 18–22h peak block (captures hot-evening peak flare).
+    df["cdd_21_x_hour"] = df["cdd_21"] * df["hour"] / 24
+    df["cdd_21_x_peak"] = ((df["hour"] >= 18) & (df["hour"] < 22)).astype(int) * df["cdd_21"]
+
     # ── S1 anomaly features vs trailing 24h baseline (4) ──
     df["temp_anom_24h"]  = df["temperature"] - df["temperature"].shift(1).rolling(48, min_periods=12).mean()
     df["hum_anom_24h"]   = df["humidity"]    - df["humidity"].shift(1).rolling(48, min_periods=12).mean()
