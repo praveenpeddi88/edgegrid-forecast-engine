@@ -1,0 +1,1335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>EdgeGrid Forecast Engine · v3 · 76-day horizon · DOW priming</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  :root {
+    --ink:#09090b; --ink-2:#18181b; --ink-3:#27272a; --ink-4:#3f3f46;
+    --line:#27272a; --line-2:#3f3f46;
+    --muted:#71717a; --muted-2:#a1a1aa;
+    --paper:#fafaf9; --paper-2:#f4f4f5;
+    --teal:#14b8a6; --teal-2:#0d9488; --teal-soft:rgba(20,184,166,0.18);
+    --green:#10b981; --amber:#f59e0b; --red:#ef4444;
+    --green-soft:rgba(16,185,129,0.12); --amber-soft:rgba(245,158,11,0.12); --red-soft:rgba(239,68,68,0.12);
+    --violet:#8b5cf6; --violet-soft:rgba(139,92,246,0.14);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background: var(--ink); color: var(--paper); font-family: 'Poppins', system-ui, sans-serif; font-size: 13px; line-height: 1.45; }
+  .mono, code { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace; }
+  a { color: var(--teal); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ::selection { background: var(--teal); color: var(--ink); }
+
+  /* HEADER */
+  header.app {
+    border-bottom: 1px solid var(--line);
+    padding: 18px 24px 14px;
+    background: linear-gradient(180deg, #0a0a0c 0%, var(--ink) 100%);
+    position: sticky; top:0; z-index: 50;
+  }
+  .header-row { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  .brand { font-weight: 700; font-size: 18px; letter-spacing: -0.01em; color: var(--paper); }
+  .brand .v { color: var(--teal); font-weight: 500; margin-left: 6px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .strap { color: var(--muted); font-size: 12px; }
+
+  .kpi-strip { display: flex; gap: 14px; margin-top: 14px; flex-wrap: wrap; align-items: stretch; }
+  .kpi {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    min-width: 120px;
+    background: var(--ink-2);
+  }
+  .kpi .lbl { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .kpi .val { font-size: 22px; font-weight: 600; color: var(--paper); margin-top: 2px; font-family: 'JetBrains Mono', monospace; line-height: 1.05; }
+  .kpi .sub { font-size: 11px; color: var(--muted-2); margin-top: 2px; }
+  .kpi.teal { border-color: var(--teal-2); }
+  .kpi.teal .val { color: var(--teal); }
+  .kpi.violet { border-color: rgba(139,92,246,0.45); }
+  .kpi.violet .val { color: #a78bfa; }
+  .kpi.split .val { display: flex; gap: 6px; align-items: baseline; }
+  .pill { display: inline-block; padding: 1.5px 7px; border-radius: 999px; font-size: 11px; font-weight: 500; letter-spacing: 0.02em; }
+  .pill.green { background: var(--green-soft); color: var(--green); }
+  .pill.amber { background: var(--amber-soft); color: var(--amber); }
+  .pill.red   { background: var(--red-soft);   color: var(--red); }
+  .pill.tier  { background: rgba(255,255,255,0.04); color: var(--muted-2); border: 1px solid var(--line); }
+  .pill.phase { background: rgba(20,184,166,0.08); color: var(--teal); border: 1px solid rgba(20,184,166,0.22); }
+  .pill.verified { background: rgba(20,184,166,0.16); color: var(--teal); border: 1px solid rgba(20,184,166,0.30); }
+  .pill.forecast-only { background: rgba(139,92,246,0.14); color: #a78bfa; border: 1px solid rgba(139,92,246,0.30); }
+
+  /* CONTROLS BAR */
+  .controls {
+    border-bottom: 1px solid var(--line);
+    background: var(--ink-2);
+    padding: 10px 24px;
+    display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start;
+    position: sticky; top: 0; z-index: 40;
+  }
+  .ctrl-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .ctrl-group.col { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .ctrl-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--ink); }
+  .seg button {
+    background: transparent; color: var(--muted-2); border: none; padding: 6px 10px; font-size: 12px; cursor: pointer;
+    font-family: inherit; border-right: 1px solid var(--line); transition: background .12s, color .12s;
+  }
+  .seg button:last-child { border-right: none; }
+  .seg button:hover { color: var(--paper); background: var(--ink-3); }
+  .seg button.active { background: var(--teal); color: var(--ink); font-weight: 600; }
+  .seg button .gtag { font-size: 9px; color: var(--ink-3); margin-left: 4px; font-weight: 700; letter-spacing: 0.04em; }
+  .seg button:not(.active) .gtag { color: var(--muted); }
+
+  /* MONTH + DAY PICKER */
+  .month-seg button { min-width: 70px; }
+  .month-seg button .mc { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: rgba(255,255,255,0.06); font-size: 10px; color: var(--muted-2); font-weight: 500; }
+  .month-seg button.active .mc { background: var(--ink); color: var(--ink-2); }
+  .day-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+    gap: 4px;
+    max-width: 720px;
+    margin-top: 6px;
+  }
+  .day-grid button {
+    background: var(--ink); color: var(--muted-2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 4px; font-size: 11px; cursor: pointer;
+    font-family: inherit; text-align: center; line-height: 1.15;
+    position: relative; transition: background .1s, border-color .1s, color .1s;
+  }
+  .day-grid button:hover { color: var(--paper); border-color: var(--line-2); background: var(--ink-2); }
+  .day-grid button.active { background: var(--teal); color: var(--ink); border-color: var(--teal); font-weight: 600; }
+  .day-grid button .dnum { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600; display: block; }
+  .day-grid button .dwk { font-size: 9.5px; color: inherit; opacity: 0.75; display: block; margin-top: -1px; }
+  .day-grid button.has-actual::after {
+    content: ''; display: block; position: absolute;
+    top: 4px; right: 5px; width: 5px; height: 5px; border-radius: 50%;
+    background: var(--teal);
+  }
+  .day-grid button.active.has-actual::after { background: var(--ink); }
+  .day-grid button.all-day { grid-column: span 2; }
+  .day-pill-row { display: flex; gap: 8px; margin-bottom: 4px; align-items: center; flex-wrap: wrap; }
+  .day-pill-row .lbl { font-size: 10.5px; color: var(--muted); }
+  .day-legend { font-size: 10.5px; color: var(--muted-2); display: inline-flex; align-items: center; gap: 4px; }
+  .day-legend .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--teal); display: inline-block; }
+
+  /* MAIN GRID */
+  main {
+    display: grid;
+    grid-template-columns: 280px 1fr 320px;
+    gap: 0;
+    min-height: 560px;
+  }
+  @media (max-width: 1100px) {
+    main { grid-template-columns: 240px 1fr; }
+    aside.right { display: none; }
+  }
+
+  /* LEFT METER LIST */
+  aside.left {
+    border-right: 1px solid var(--line);
+    background: var(--ink-2);
+    overflow-y: auto;
+    overflow-x: hidden;
+    max-height: calc(100vh - 60px);
+  }
+  .meter-list-head { padding: 12px 16px 8px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--ink-2); z-index: 5; }
+  .meter-list-head .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .meter-list-head .ct { font-size: 18px; font-weight: 600; color: var(--paper); margin-top: 2px; }
+  .meter-list-head .filter-row { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
+  .meter-list-head .filter-row button {
+    background: transparent; color: var(--muted-2); border: 1px solid var(--line); border-radius: 999px;
+    font-size: 11px; padding: 2px 9px; cursor: pointer; font-family: inherit;
+  }
+  .meter-list-head .filter-row button.active { background: var(--paper); color: var(--ink); border-color: var(--paper); font-weight: 600; }
+  .meter-list-head .filter-row button:hover { color: var(--paper); }
+  .meter-list-head .filter-row button.active:hover { color: var(--ink); }
+  .meter-row {
+    padding: 10px 16px; border-bottom: 1px solid #1c1c1f; cursor: pointer;
+    display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: center;
+    transition: background .1s;
+  }
+  .meter-row:hover { background: #1c1c1f; }
+  .meter-row.selected { background: #14b8a614; border-left: 3px solid var(--teal); padding-left: 13px; }
+  .meter-row .msn { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--paper); font-weight: 500; }
+  .meter-row .meta { font-size: 10.5px; color: var(--muted); display: flex; gap: 6px; }
+  .meter-row .mape { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600; }
+  .meter-row .mape.green { color: var(--green); }
+  .meter-row .mape.amber { color: var(--amber); }
+  .meter-row .mape.red   { color: var(--red); }
+  .meter-row .mape-sub { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--muted); text-align: right; }
+  .meter-row .bar {
+    grid-column: 1 / -1; height: 3px; border-radius: 2px; background: #1c1c1f; overflow: hidden;
+  }
+  .meter-row .bar > span { display: block; height: 100%; }
+  .fleet-row {
+    padding: 12px 16px; border-bottom: 1px solid var(--line); cursor: pointer;
+    background: linear-gradient(180deg, rgba(20,184,166,0.10), rgba(20,184,166,0.02));
+  }
+  .fleet-row.selected { background: rgba(20,184,166,0.18); border-left: 3px solid var(--teal); padding-left: 13px; }
+  .fleet-row:hover { background: rgba(20,184,166,0.14); }
+  .fleet-row .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .fleet-row .val { font-family: 'JetBrains Mono', monospace; font-size: 14px; color: var(--paper); margin-top: 2px; font-weight: 600; }
+
+  /* CENTER CHART */
+  section.center {
+    overflow-y: auto;
+    padding: 16px 22px 28px;
+    background: var(--ink);
+  }
+  .chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
+  .chart-title { font-size: 16px; font-weight: 600; color: var(--paper); }
+  .chart-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .gran-tag {
+    display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; margin-left: 6px;
+  }
+  .gran-tag.native { background: rgba(20,184,166,0.18); color: var(--teal); }
+  .gran-tag.aggr   { background: rgba(16,185,129,0.16); color: var(--green); }
+  .gran-tag.derived{ background: rgba(245,158,11,0.16); color: var(--amber); }
+
+  .day-banner {
+    margin-top: 8px; padding: 8px 12px; border-radius: 8px;
+    font-size: 12px; line-height: 1.45; display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
+  }
+  .day-banner.verified { background: rgba(20,184,166,0.08); border: 1px solid rgba(20,184,166,0.25); color: var(--paper); }
+  .day-banner.forecast-only { background: rgba(139,92,246,0.08); border: 1px solid rgba(139,92,246,0.30); color: var(--paper); }
+  .day-banner .ico { font-weight: 700; letter-spacing: 0.05em; font-size: 10.5px; padding: 2px 8px; border-radius: 4px; }
+  .day-banner.verified .ico { background: var(--teal); color: var(--ink); }
+  .day-banner.forecast-only .ico { background: #a78bfa; color: var(--ink); }
+  .day-banner .why { color: var(--muted-2); font-size: 11.5px; }
+
+  .chart-host {
+    background: var(--ink-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 14px 10px;
+    margin-top: 10px;
+    position: relative;
+  }
+  .legend { display: flex; gap: 18px; font-size: 11.5px; color: var(--muted-2); margin: 0 0 6px 8px; flex-wrap: wrap; }
+  .legend .it { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { display: inline-block; width: 18px; height: 3px; border-radius: 2px; }
+  .legend .sw.dash { background-image: linear-gradient(90deg, currentColor 0%, currentColor 50%, transparent 50%, transparent 100%); background-size: 6px 100%; height: 2px; background-color: transparent !important; }
+  .legend .sw.area { height: 10px; border-radius: 3px; }
+  .chart-svg { display: block; width: 100%; height: 360px; }
+  .axis text { fill: var(--muted-2); font-size: 10.5px; font-family: 'JetBrains Mono', monospace; }
+  .axis path, .axis line { stroke: #2c2c30; }
+  .axis .domain { stroke: #2c2c30; }
+  .gridline { stroke: #1c1c1f; stroke-dasharray: 2 3; }
+  .hover-line { stroke: var(--paper); stroke-dasharray: 2 3; opacity: 0.5; }
+  .hover-marker { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; }
+
+  .tt {
+    position: absolute; pointer-events: none; background: var(--ink); border: 1px solid var(--line-2);
+    padding: 8px 10px; border-radius: 6px; font-size: 11.5px; color: var(--paper); min-width: 200px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4); transform: translate(8px, 8px); z-index: 100;
+  }
+  .tt .ts { color: var(--muted-2); font-family: 'JetBrains Mono', monospace; font-size: 10.5px; }
+  .tt .row { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; margin-top: 3px; }
+  .tt .row .k { color: var(--muted-2); }
+  .tt .row .v { font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+  .tt .v.teal { color: var(--teal); }
+  .tt .v.act  { color: var(--paper); }
+  .tt .v.delta { color: var(--amber); }
+
+  /* BLOCK MAPE QUADRANT */
+  .block-quad {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+    margin-top: 16px;
+  }
+  .block-cell {
+    background: var(--ink-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .block-cell .lbl { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .block-cell .val { font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 600; margin-top: 2px; }
+  .block-cell .delta { font-size: 11px; color: var(--muted-2); margin-top: 2px; }
+  .block-cell.green .val { color: var(--green); }
+  .block-cell.amber .val { color: var(--amber); }
+  .block-cell.red   .val { color: var(--red); }
+  .block-cell.muted .val { color: var(--muted); font-size: 16px; }
+
+  /* METRICS STRIP */
+  .metrics-strip {
+    display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px;
+    margin-top: 14px;
+  }
+  @media (max-width: 1500px) { .metrics-strip { grid-template-columns: repeat(4, 1fr); } }
+  .metric-cell {
+    background: var(--ink-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 11px; cursor: help;
+  }
+  .metric-cell .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; display: flex; justify-content: space-between; align-items: baseline; }
+  .metric-cell .lbl .help { color: var(--ink-4); font-size: 10px; cursor: help; }
+  .metric-cell .val { font-family: 'JetBrains Mono', monospace; font-size: 17px; font-weight: 600; margin-top: 3px; color: var(--paper); }
+  .metric-cell .sub { font-size: 10.5px; color: var(--muted-2); margin-top: 1px; }
+  .metric-cell.good .val { color: var(--green); }
+  .metric-cell.warn .val { color: var(--amber); }
+  .metric-cell.bad  .val { color: var(--red); }
+  .metric-cell.empty { grid-column: 1 / -1; padding: 14px 16px; cursor: default; }
+  .metric-cell.empty .val { color: #a78bfa; font-size: 14px; font-family: 'Poppins', sans-serif; font-weight: 500; }
+  .metric-cell.empty .sub { color: var(--muted-2); margin-top: 4px; font-size: 11.5px; }
+
+  /* RIGHT PANEL */
+  aside.right {
+    border-left: 1px solid var(--line);
+    background: var(--ink-2);
+    overflow-y: auto;
+    padding: 16px 18px 28px;
+    max-height: calc(100vh - 60px);
+  }
+  .panel-section { margin-bottom: 20px; }
+  .panel-section h3 { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; margin: 0 0 8px; font-weight: 600; }
+  .kv { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #1c1c1f; gap: 8px; align-items: baseline; }
+  .kv:last-child { border-bottom: none; }
+  .kv .k { color: var(--muted-2); font-size: 11.5px; }
+  .kv .v { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--paper); text-align: right; }
+  .gran-context, .day-context {
+    border-radius: 8px; padding: 10px 12px; font-size: 11.5px; line-height: 1.5;
+  }
+  .gran-context.native  { background: rgba(20,184,166,0.10);  border: 1px solid rgba(20,184,166,0.30); color: var(--teal); }
+  .gran-context.aggr    { background: rgba(16,185,129,0.10);  border: 1px solid rgba(16,185,129,0.30); color: var(--green); }
+  .gran-context.derived { background: rgba(245,158,11,0.10);  border: 1px solid rgba(245,158,11,0.30); color: var(--amber); }
+  .gran-context strong, .day-context strong { display: block; margin-bottom: 4px; font-size: 12px; letter-spacing: 0.02em; }
+  .gran-context span, .day-context span { color: var(--paper); }
+  .day-context.verified { background: rgba(20,184,166,0.10); border: 1px solid rgba(20,184,166,0.30); color: var(--teal); }
+  .day-context.forecast-only { background: rgba(139,92,246,0.10); border: 1px solid rgba(139,92,246,0.30); color: #a78bfa; }
+
+  /* ASSUMPTION LEDGER */
+  .ledger-wrap { padding: 22px 24px 40px; border-top: 1px solid var(--line); background: var(--ink-2); }
+  .ledger-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  .ledger-head h2 { font-size: 16px; font-weight: 600; margin: 0; color: var(--paper); }
+  .ledger-head .sub { color: var(--muted); font-size: 12px; max-width: 720px; }
+  .ledger-filters { display: flex; gap: 6px; margin: 12px 0 14px; flex-wrap: wrap; }
+  .ledger-filters button {
+    background: transparent; color: var(--muted-2); border: 1px solid var(--line); border-radius: 999px;
+    font-size: 11px; padding: 4px 11px; cursor: pointer; font-family: inherit;
+  }
+  .ledger-filters button.active { background: var(--paper); color: var(--ink); border-color: var(--paper); font-weight: 600; }
+  .ledger-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 12px; }
+  .assumption {
+    border: 1px solid var(--line); background: var(--ink); border-radius: 10px; padding: 12px 14px;
+  }
+  .assumption .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+  .assumption .id { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); }
+  .assumption .cat { font-size: 10px; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+  .assumption .cat.data        { background: rgba(20,184,166,0.16);  color: var(--teal); }
+  .assumption .cat.model       { background: rgba(99,102,241,0.16);  color: #a5b4fc; }
+  .assumption .cat.validation  { background: rgba(16,185,129,0.16);  color: var(--green); }
+  .assumption .cat.product     { background: rgba(245,158,11,0.16);  color: var(--amber); }
+  .assumption .cat.commercial  { background: rgba(244,63,94,0.16);   color: #fda4af; }
+  .assumption .title { font-size: 13.5px; font-weight: 600; color: var(--paper); margin: 4px 0 4px; }
+  .assumption .body  { font-size: 12px; color: var(--muted-2); line-height: 1.55; }
+  .assumption .tag {
+    display: inline-block; font-size: 9.5px; padding: 1.5px 6px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; margin-left: 4px;
+  }
+  .assumption .tag.fact      { background: rgba(16,185,129,0.18); color: var(--green); }
+  .assumption .tag.heuristic { background: rgba(245,158,11,0.18); color: var(--amber); }
+  .assumption .tag.open      { background: rgba(244,63,94,0.18);  color: #fda4af; }
+
+  footer.app {
+    padding: 18px 24px 24px;
+    color: var(--muted);
+    font-size: 11px;
+    border-top: 1px solid var(--line);
+  }
+  footer.app .row { display: flex; gap: 24px; flex-wrap: wrap; justify-content: space-between; }
+  footer.app .left  { max-width: 760px; }
+  footer.app .right { font-family: 'JetBrains Mono', monospace; }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2c2c30; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+</style>
+</head>
+<body>
+
+<header class="app">
+  <div class="header-row">
+    <div>
+      <span class="brand">EdgeGrid Forecast Engine<span class="v">v3 · 76-day horizon · DOW priming</span></span>
+    </div>
+    <div class="strap" id="strap-line"></div>
+  </div>
+  <div class="kpi-strip" id="kpi-strip"></div>
+</header>
+
+<div class="controls">
+  <div class="ctrl-group">
+    <span class="ctrl-label">Granularity</span>
+    <div class="seg" id="gran-seg"></div>
+  </div>
+  <div class="ctrl-group col">
+    <div class="day-pill-row">
+      <span class="ctrl-label">Forecast date</span>
+      <div class="seg month-seg" id="month-seg"></div>
+      <span class="day-legend"><span class="dot"></span>has held-out actual</span>
+    </div>
+    <div class="day-grid" id="day-grid"></div>
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">Sort</span>
+    <div class="seg" id="sort-seg">
+      <button data-sort="backtest_asc" class="active">Backtest MAPE ↑</button>
+      <button data-sort="backtest_desc">Backtest MAPE ↓</button>
+      <button data-sort="bundle_asc">Bundle MAPE ↑</button>
+      <button data-sort="msn">MSN</button>
+    </div>
+  </div>
+</div>
+
+<main>
+  <aside class="left">
+    <div class="meter-list-head">
+      <div class="lbl">Meters</div>
+      <div class="ct" id="meter-count"></div>
+      <div class="filter-row" id="filter-row">
+        <button data-filt="all" class="active">All</button>
+        <button data-filt="green">Green</button>
+        <button data-filt="amber">Amber</button>
+        <button data-filt="red">Red</button>
+        <button data-filt="3PH">3PH</button>
+        <button data-filt="1PH">1PH</button>
+      </div>
+    </div>
+    <div class="fleet-row" id="fleet-row" data-msn="__FLEET__">
+      <div class="lbl">Fleet aggregate</div>
+      <div class="val" id="fleet-val"></div>
+    </div>
+    <div id="meter-list"></div>
+  </aside>
+
+  <section class="center">
+    <div class="chart-head">
+      <div>
+        <div class="chart-title" id="chart-title"></div>
+        <div class="chart-sub" id="chart-sub"></div>
+      </div>
+      <div id="chart-mape-pill"></div>
+    </div>
+    <div id="day-banner-host"></div>
+    <div class="chart-host">
+      <div class="legend" id="legend"></div>
+      <svg class="chart-svg" id="chart"></svg>
+    </div>
+    <div class="metrics-strip" id="metrics-strip"></div>
+    <div class="block-quad" id="block-quad"></div>
+  </section>
+
+  <aside class="right" id="right-panel"></aside>
+</main>
+
+<div class="ledger-wrap">
+  <div class="ledger-head">
+    <div>
+      <h2>Assumption ledger</h2>
+      <div class="sub">Every number on this page rests on these assumptions. <strong style="color:var(--green)">FACT</strong> = true today by design or observation. <strong style="color:var(--amber)">HEURISTIC</strong> = a defensible choice that could move. <strong style="color:#fda4af">OPEN</strong> = a known limitation we have not closed yet. v3 introduces the 76-day-horizon stress test (a23–a26). If you read a number you don't trust, find the assumption that explains it.</div>
+    </div>
+  </div>
+  <div class="ledger-filters" id="ledger-filters"></div>
+  <div class="ledger-grid" id="ledger-grid"></div>
+</div>
+
+<footer class="app">
+  <div class="row">
+    <div class="left">
+      Disposable design prototype. The forecast curve is the real production v4 LightGBM model — one model per meter — pushed 76 days into the future from a context cutoff of 2026-02-04 23:30. Each forecast day is independently primed from the matching same-day-of-week 7 days back (no recursive cascade). The dashed actual line is held-out MDMS truth for Feb 5 → Feb 12 only; the rest of the horizon is pure forecast against an unknown future. Any value on this page maps to an assumption ID in the ledger.
+    </div>
+    <div class="right">edgegrid_forecast/inference/v4_predict.py</div>
+  </div>
+</footer>
+
+<script>
+const FIXTURE = __FIXTURE_JSON__;
+
+/* ============== granularity definitions ============== */
+const GRANS = [
+  {min:5,   label:'5 min',  cls:'derived'},
+  {min:15,  label:'15 min', cls:'derived'},
+  {min:20,  label:'20 min', cls:'derived'},
+  {min:30,  label:'30 min', cls:'native'},
+  {min:45,  label:'45 min', cls:'derived'},
+  {min:60,  label:'1 hr',   cls:'aggr'},
+  {min:120, label:'2 hr',   cls:'aggr'},
+  {min:240, label:'4 hr',   cls:'aggr'},
+  {min:420, label:'7 hr',   cls:'aggr'},
+];
+const GRAN_DESC = {
+  native:  {tag:'NATIVE',       title:'Native model cadence',       text:'30-minute MDMS block. The forecast and the holdout actuals exist at this exact resolution. Nothing is interpolated, nothing is aggregated.'},
+  aggr:    {tag:'AGGREGATED',   title:'Authentic aggregation',      text:'Multiple consecutive 30-min blocks summed. Mathematically exact for energy (kWh adds). Use this when you want to reason about hourly contracts, ramp windows, or shift-level demand.'},
+  derived: {tag:'DERIVED',      title:'Derived sub-block view',     text:'The model does not predict at sub-30-min cadence. We proportionally redistribute each native block\'s energy across the smaller bins. Useful for visual smoothness; do NOT cite as a sub-30-min prediction.'},
+};
+
+/* ============== utility: bucketize ============== */
+function bucketize(ts_iso, kwh, granMin, allowNullPropagate=false) {
+  const NAT = 30 * 60000;
+  const dates = ts_iso.map(t => (t instanceof Date) ? t.getTime() : new Date(t).getTime());
+  if (!dates.length) return {ts:[], kwh:[]};
+  const start = dates[0];
+  const end = dates[dates.length-1] + NAT;
+  const W = granMin * 60000;
+  const out_ts = [], out_kwh = [];
+  let bucketStart = start;
+  while (bucketStart < end) {
+    const bucketEnd = bucketStart + W;
+    let acc = 0;
+    let nullSeen = false;
+    let anyOverlap = false;
+    for (let i = 0; i < dates.length; i++) {
+      const bs = dates[i], be = bs + NAT;
+      const ov = Math.min(be, bucketEnd) - Math.max(bs, bucketStart);
+      if (ov > 0) {
+        anyOverlap = true;
+        if (kwh[i] === null || kwh[i] === undefined) { nullSeen = true; }
+        else { acc += kwh[i] * (ov / NAT); }
+      }
+    }
+    out_ts.push(new Date(bucketStart));
+    if (allowNullPropagate && nullSeen) out_kwh.push(null);
+    else if (!anyOverlap) out_kwh.push(null);
+    else out_kwh.push(+acc.toFixed(4));
+    bucketStart = bucketEnd;
+  }
+  return {ts: out_ts, kwh: out_kwh};
+}
+
+/* ============== state ============== */
+const G = FIXTURE.global;
+const meters = FIXTURE.meters;
+const fleet = FIXTURE.fleet;
+
+const BACKTEST_END_KEY = G.backtest_window.end.slice(0,10);   // '2026-02-12'
+
+const state = {
+  granIdx: 5,        // default 1 hr (more honest at 76d horizon)
+  selectedMsn: '__FLEET__',
+  filter: 'all',
+  sort: 'backtest_asc',
+  ledgerFilter: 'all',
+  monthKey: '2026-02',
+  dayKey: '2026-02-05',  // first verified day
+};
+
+/* ============== day filter helpers ============== */
+function dayKeyOf(iso) { return (typeof iso === 'string') ? iso.slice(0,10) : iso.toISOString().slice(0,10); }
+function monthKeyOf(d) { return d.slice(0,7); }
+
+function getForecastSource(msn) {
+  if (msn === '__FLEET__') return fleet;
+  return meters.find(x => x.msn === msn);
+}
+function getDaysForSource(src) {
+  if (!src) return [];
+  const set = new Set();
+  (src.forecast_ts || []).forEach(t => set.add(dayKeyOf(t)));
+  return [...set].sort();
+}
+function getMonthsForSource(src) {
+  const days = getDaysForSource(src);
+  const set = new Set();
+  days.forEach(d => set.add(monthKeyOf(d)));
+  return [...set].sort();
+}
+function dayHasActual(src, dayKey) {
+  // a day is "verified" if at least one actual_kwh value is non-null on that day
+  if (!src || !src.actual_kwh) return false;
+  for (let i = 0; i < src.forecast_ts.length; i++) {
+    if (dayKeyOf(src.forecast_ts[i]) === dayKey && src.actual_kwh[i] !== null && src.actual_kwh[i] !== undefined) {
+      return true;
+    }
+  }
+  return false;
+}
+function isVerifiedDay(dayKey) {
+  // Feb 5 .. Feb 12 inclusive
+  return dayKey >= '2026-02-05' && dayKey <= BACKTEST_END_KEY;
+}
+
+// Restrict aligned ts/values to currently-selected day
+function filterByDay(ts_iso, values) {
+  if (state.dayKey === 'all') return {ts: ts_iso.slice(), values: values.slice()};
+  const out_ts = [], out_v = [];
+  for (let i = 0; i < ts_iso.length; i++) {
+    if (dayKeyOf(ts_iso[i]) === state.dayKey) {
+      out_ts.push(ts_iso[i]); out_v.push(values[i]);
+    }
+  }
+  return {ts: out_ts, values: out_v};
+}
+
+/* ============== metrics at selected granularity ============== */
+function computeMetrics(pred_kwh, actual_kwh, lo_kwh, hi_kwh, ts) {
+  const n = pred_kwh.length;
+  const pairs = [];
+  for (let i = 0; i < n; i++) {
+    const p = pred_kwh[i], a = actual_kwh[i];
+    if (p == null || a == null) continue;
+    pairs.push({p, a, lo: lo_kwh[i], hi: hi_kwh[i], t: ts[i]});
+  }
+  if (!pairs.length) return {n:0};
+  const mapePairs = pairs.filter(d => d.a > 0.001);
+  const mape = mapePairs.length
+    ? mapePairs.reduce((s,d) => s + Math.abs(d.p - d.a)/d.a, 0) / mapePairs.length * 100
+    : null;
+  const mae = pairs.reduce((s,d) => s + Math.abs(d.p - d.a), 0) / pairs.length;
+  const rmse = Math.sqrt(pairs.reduce((s,d) => s + (d.p - d.a)**2, 0) / pairs.length);
+  const mbe = pairs.reduce((s,d) => s + (d.p - d.a), 0) / pairs.length;
+  const smape = pairs.reduce((s,d) => {
+    const denom = Math.abs(d.p) + Math.abs(d.a);
+    return denom > 0 ? s + 2 * Math.abs(d.p - d.a) / denom : s;
+  }, 0) / pairs.length * 100;
+  const mean_a = pairs.reduce((s,d) => s + d.a, 0) / pairs.length;
+  const ss_res = pairs.reduce((s,d) => s + (d.a - d.p)**2, 0);
+  const ss_tot = pairs.reduce((s,d) => s + (d.a - mean_a)**2, 0);
+  const r2 = ss_tot > 0 ? 1 - ss_res/ss_tot : null;
+  const bandPairs = pairs.filter(d => d.lo != null && d.hi != null);
+  const covered = bandPairs.filter(d => d.a >= d.lo && d.a <= d.hi).length;
+  const coverage = bandPairs.length ? (covered / bandPairs.length) * 100 : null;
+  let worst = null;
+  mapePairs.forEach(d => {
+    const e = Math.abs(d.p - d.a)/d.a * 100;
+    if (!worst || e > worst.e) worst = {e, t: d.t, p: d.p, a: d.a};
+  });
+  return {n: pairs.length, mape, mae, rmse, mbe, smape, r2, coverage, worst, sum_a: pairs.reduce((s,d)=>s+d.a,0), sum_p: pairs.reduce((s,d)=>s+d.p,0)};
+}
+
+function metricsOfBlock(pred, actual, ts, blockName) {
+  const hourOf = t => (t instanceof Date) ? t.getHours() : new Date(t).getHours();
+  const inBlock = (t) => {
+    const h = hourOf(t);
+    if (blockName === 'night')   return h >= 23 || h < 6;
+    if (blockName === 'morning') return h >= 6  && h < 10;
+    if (blockName === 'solar')   return h >= 10 && h < 16;
+    if (blockName === 'peak')    return h >= 16 && h < 23;
+    return false;
+  };
+  const p = [], a = [];
+  for (let i = 0; i < pred.length; i++) {
+    if (!inBlock(ts[i])) continue;
+    if (pred[i] == null || actual[i] == null) continue;
+    p.push(pred[i]); a.push(actual[i]);
+  }
+  if (!a.length) return null;
+  const valid = [];
+  for (let i = 0; i < p.length; i++) if (a[i] > 0.001) valid.push({p:p[i], a:a[i]});
+  const mape = valid.length ? valid.reduce((s,d)=>s + Math.abs(d.p-d.a)/d.a, 0) / valid.length * 100 : null;
+  const mae  = p.length ? p.reduce((s,_,i) => s + Math.abs(p[i]-a[i]), 0) / p.length : null;
+  return {mape, mae, n: p.length};
+}
+
+/* ============== assumption ledger ============== */
+const LEDGER = [
+  {id:'a01', cat:'data', tag:'fact',
+    title:'MDMS pipe-delimited block load profile',
+    body:'Source: APEPDCL MDMS exports — 788,748 TP rows + 63,561 SP rows across 50 meters. Native 30-min cadence. wh_imp is per-block import energy in Wh. The context fed into the forecast ends 2026-02-04 23:30; everything to the right of that vertical line is model output.'},
+  {id:'a02', cat:'data', tag:'fact',
+    title:'Customer-meter mapping is verified',
+    body:'SCS_PMSGVENDOR.xlsx provides SCNO → UKSCNO → MTR_SNO → Phase. Every meter on this page resolves to a real billing account.'},
+  {id:'a03', cat:'data', tag:'fact',
+    title:'Data window: Oct 2024 – Feb 12 2026',
+    body:'Earliest block 2024-10-23, latest 2026-02-12 15:00. The eight days Feb 5 → Feb 12 are the held-out backtest window. Feb 13 → Apr 21 sits beyond observed data — that is the genuinely-unknown 70-day forecast horizon.'},
+  {id:'a04', cat:'data', tag:'open',
+    title:'8 uploaded meters have no trained model yet',
+    body:'42 of 50 uploaded meters have a v4 model bundle in models/v4/. The other 8 (51219717, 65025585, 65030985, 65046467, 65075811, 66005522, 66012833, 67005849) need a re-train pass before they appear here.'},
+  {id:'a05', cat:'data', tag:'heuristic',
+    title:'Duplicate (msn, ts) rows are dropped',
+    body:'MDMS occasionally re-emits the same (meter, timestamp) row — likely a polling retry or stitching artefact. We keep first occurrence. Duplicate rate is small (<2%) but ignoring it would corrupt the time index.'},
+  {id:'a06', cat:'model', tag:'fact',
+    title:'One LightGBM model per meter (v4)',
+    body:'Each meter has its own trained gradient-boosted forecaster — mean + q10 + q90 quantile heads. No global model — meter behaviour is too heterogeneous (residential / commercial / C&I / solar-coupled). Bundles live at models/v4/{msn}.joblib.'},
+  {id:'a07', cat:'model', tag:'fact',
+    title:'Confidence band = q10 / q90 quantile heads',
+    body:'The teal band on the chart is not a parametric ±MAPE construction. It is the actual q10 / q90 LightGBM quantile predictions. Read it as: 80% of historical realisations fell inside this corridor.'},
+  {id:'a08', cat:'model', tag:'heuristic',
+    title:'Hyperparameters chosen per-tier',
+    body:'Small (<500 kWh/mo), Medium (0.5–1.5k), Large (1.5k+) meters get different num_leaves, learning_rate, regularisation, and feature subsets. Avoids large-meter dominance and prevents low-signal overfitting on small meters.'},
+  {id:'a09', cat:'model', tag:'fact',
+    title:'Bias gate: log1p target if MBE > 1%',
+    body:'Each meter is auto-evaluated for systematic over/under-bias on a hold-back. If raw MBE is large, the model retrains on log1p(target). The bundle records use_log1p, trail_mbe_capped, trail_mbe_raw, bias_gate so any number is reproducible.'},
+  {id:'a10', cat:'model', tag:'open',
+    title:'Live IEX price + weather not wired into inference',
+    body:'The training pipeline supports price-aware and weather-aware features. v3 inference uses the cached Open-Meteo archive for Visakhapatnam through 2026-04-21 (real wx, but historical archive — not a forecast wx model). Live wiring lands in v5.'},
+  {id:'a11', cat:'validation', tag:'fact',
+    title:'Backtest = real out-of-sample, never trained on',
+    body:'For each meter, the 8 days Feb 5 → Feb 12 sit AFTER its train_cutoff (between Nov-2025 and Dec-2025 depending on tier). The MAPE on the meter list is computed against MDMS truth the model never saw. Days after Feb 12 have no actuals to score against — that is honest pure forecast, not a self-graded number.'},
+  {id:'a12', cat:'validation', tag:'heuristic',
+    title:'Tiny-load blocks (≤1 Wh) excluded from MAPE',
+    body:'A meter that consumes 0.5 Wh in a block but is predicted at 5 Wh would contribute a 900% percentage error. We drop blocks where actual ≤ 1 Wh from the MAPE numerator. Affects <3% of blocks fleet-wide.'},
+  {id:'a13', cat:'validation', tag:'fact',
+    title:'Block taxonomy: Night / Morning / Solar / Peak',
+    body:'IEC-aligned: Night 23:00–06:00, Morning 06:00–10:00, Solar 10:00–16:00, Peak 16:00–23:00. Per-block MAPE shown in the quadrant tells you WHEN a model misses, not just how much.'},
+  {id:'a14', cat:'validation', tag:'open',
+    title:'Some meters have <336 backtest blocks',
+    body:'Where MDMS has gaps inside the 8-day backtest window we cannot evaluate every block. The "n eval blocks" field shows how many blocks the backtest MAPE was computed over. A meter with <100 eval blocks is on the watch-list, not a verdict.'},
+  {id:'a15', cat:'product', tag:'fact',
+    title:'30 min is the only true cadence',
+    body:'The model trains and predicts at 30-min resolution. 1h / 2h / 4h / 7h are mathematically exact aggregations. 5 / 15 / 20 / 45 min are derived re-bucketing — they look smoother but no extra information is generated.'},
+  {id:'a16', cat:'product', tag:'heuristic',
+    title:'Derived sub-30-min uses proportional area redistribution',
+    body:'For 5/15/20/45 min bins we distribute each native block\'s energy across overlapping target bins by overlap fraction. This is what a half-hourly meter "would look like" at finer cadence assuming uniform within-block load. Real sub-block load is not uniform; the chart smooths what is actually a step.'},
+  {id:'a17', cat:'product', tag:'fact',
+    title:'Fleet aggregate = simple sum across meters',
+    body:'Per-timestamp sum of meter forecasts and meter actuals. No coincidence factor, no diversity adjustment, no line loss. Acceptable for the substation-level "what flow is this fleet drawing right now" view; not acceptable for grid-loss-aware billing.'},
+  {id:'a18', cat:'product', tag:'open',
+    title:'No outage / holiday / festival calendar',
+    body:'Sankranti, Ugadi, planned shutdowns, scheduled load-shed, and feeder maintenance windows are not features yet. A meter that lost power for 4 hours of the backtest window will show a high MAPE here — that is a data-truth issue, not a model issue. Especially relevant for the 70-day pure-forecast tail (Feb 13 → Apr 21) where Holi (Mar 14), Ugadi (Mar 19), Eid (Mar 21), Ram Navami (Mar 27) and Mahavir Jayanti (Apr 11) are all unmodelled.'},
+  {id:'a19', cat:'commercial', tag:'fact',
+    title:'Per-meter model is a commercial primitive',
+    body:'Each forecast can be quoted to a single SCNO / UKSCNO. That is what makes BESS scoping, ToU contracts, FLS landed cost, and arbitrage screens defensible. A fleet-only model would not.'},
+  {id:'a20', cat:'commercial', tag:'heuristic',
+    title:'Health bands: <8% green, 8–12% amber, >12% red',
+    body:'These are demand-forecast credibility cutoffs we use today. Anything green is safe to quote in a Commercial Brief; amber is quotable with a footnote; red goes back to data team for investigation before it leaves the building. v3 backtest exposes that very few meters survive these thresholds at 76-day horizon — that is the honest finding, not a bug.'},
+  {id:'a21', cat:'validation', tag:'heuristic',
+    title:'Metrics are computed at the selected granularity and day',
+    body:'MAPE, MAE, RMSE, MBE, sMAPE, R², and q10/q90 coverage are re-computed every time you change the Day picker or the Granularity switcher. This is intentional: a 7-hour-block MAPE can be dramatically lower than a 30-minute MAPE because opposite-sign errors cancel inside the bucket. Use 30-min for the strictest truth test, 1h-7h for operational-contract truth.'},
+  {id:'a22', cat:'validation', tag:'fact',
+    title:'R² and coverage are diagnostics, not gates',
+    body:'R² > 0.85 and q10/q90 coverage near 80% are what we hope to see on a well-calibrated meter. We do not yet gate a meter from going to a Commercial Brief on these — MAPE is the gate. R² and coverage are flagged in the metrics strip so a reader can build intuition for how trustworthy a meter is beyond the single percent error number.'},
+  {id:'a23', cat:'model', tag:'heuristic',
+    title:'76-day horizon is primed by same-day-of-week, no cascade',
+    body:'For each forecast day we prime the lag features from the matching day-of-week 7 days before (fallback to 14, 21, 28 days back if 7d window has gaps). Each day is forecast independently — the model never feeds its own outputs back as lag inputs. This avoids the cascade-drift bug we hit on the first attempt (where Day 30 was reading Day 29\'s noisy prediction as "yesterday\'s actual"). Trade-off: we lose intra-week momentum signal; gain: every day is judged on the same priming quality.'},
+  {id:'a24', cat:'validation', tag:'fact',
+    title:'Backtest MAPE ≠ Bundle holdout MAPE — and that is the point',
+    body:'Each bundle was originally evaluated on its own 25% chronological holdout (the "bundle holdout MAPE", typically 5–15%). The v3 backtest re-evaluates that same model under the v3 priming protocol, on the 8 days right after the data window. The gap between the two numbers tells you how much of the bundle\'s reported skill survives a real 8-day-ahead deployment. A meter with 5% bundle MAPE and 50% backtest MAPE is not lying — it is telling you the inference protocol matters as much as the model.'},
+  {id:'a25', cat:'validation', tag:'open',
+    title:'Pure-forecast tail (Feb 13 → Apr 21) has no truth',
+    body:'For 70 of the 76 days there are no held-out actuals. The metrics strip and block quadrant intentionally go blank on those days — we will not show a fabricated MAPE. The forecast curve and q10–q90 band are still real model output; they just cannot be self-graded. When April actuals arrive, this same fixture re-runs and the verified-day count expands.'},
+  {id:'a26', cat:'product', tag:'fact',
+    title:'No horizon-decay caveat surfaced in v3',
+    body:'We deliberately did not split the 76 days into "near horizon" / "far horizon" tiers. Same priming, same metrics, same UI for day 1 and day 76. That is the test: if quality degrades smoothly with horizon, the same-day-of-week prime is exposing reality. If it degrades in a stepwise way around festivals or weather shifts, the fix is feature engineering (a18, a10), not horizon-segmentation.'},
+];
+
+/* ============== render ============== */
+const fmtNum = d3.format(',.2f');
+const fmtPct = d3.format('.2f');
+const fmtPctNoDec = d3.format('.0f');
+const fmtKwh = d => d == null ? '—' : d3.format(',.2f')(d);
+
+function healthClass(mape) { if (mape == null) return ''; return mape < 8 ? 'green' : mape <= 12 ? 'amber' : 'red'; }
+
+/* ----- header KPIs ----- */
+function renderKpis() {
+  document.getElementById('strap-line').textContent =
+    `${G.n_meters_modeled} meters · context cuts at ${G.context_cutoff.slice(0,10)} · 76-day horizon → ${G.forecast_window.end.slice(0,10)} · ${BACKTEST_END_KEY.slice(8,10)} verified days + ${G.forecast_horizon_days - 8} pure-forecast days`;
+  const verifiedDays = 8;
+  const pureDays = G.forecast_horizon_days - verifiedDays;
+  const kpis = [
+    {lbl:'Meters modeled', val:`${G.n_meters_modeled}`, sub:`of ${G.n_meters_uploaded} uploaded`},
+    {lbl:'8-day backtest MAPE', val:`${fmtPct(G.mean_mape_real)}%`, sub:`mean · median ${fmtPct(G.median_mape_real)}%`, cls:'teal'},
+    {lbl:'Best · worst meter', val:`${fmtPct(G.min_mape_real)}% · ${fmtPct(G.max_mape_real)}%`, sub:`p75 ${fmtPct(G.p75_mape_real)}% · across all 42 meters`},
+    {lbl:'Health mix', html:`<span class="pill green">${G.green} green</span> <span class="pill amber">${G.amber} amber</span> <span class="pill red">${G.red} red</span>`, sub:'<8% / 8–12% / >12% backtest MAPE'},
+    {lbl:'Forecast horizon', val:`76 days`, sub:`${G.forecast_window.start.slice(5)} → ${G.forecast_window.end.slice(5)}`, cls:'violet'},
+    {lbl:'Verified vs pure forecast', val:`${verifiedDays} + ${pureDays}d`, sub:'days with actuals / days without'},
+  ];
+  const root = document.getElementById('kpi-strip');
+  root.innerHTML = kpis.map(k => `
+    <div class="kpi ${k.cls||''}">
+      <div class="lbl">${k.lbl}</div>
+      <div class="val">${k.html || k.val}</div>
+      <div class="sub">${k.sub||''}</div>
+    </div>
+  `).join('');
+}
+
+/* ----- granularity segmented control ----- */
+function renderGranSeg() {
+  const seg = document.getElementById('gran-seg');
+  seg.innerHTML = GRANS.map((g, i) => `
+    <button data-i="${i}" class="${i===state.granIdx?'active':''}">
+      ${g.label}<span class="gtag">${g.cls === 'native' ? 'NAT' : g.cls === 'aggr' ? 'AGG' : 'DRV'}</span>
+    </button>
+  `).join('');
+  seg.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    state.granIdx = +b.dataset.i;
+    seg.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+    rerenderChart();
+  }));
+}
+
+/* ----- month + day picker ----- */
+const MONTH_LABEL = {
+  '2026-02': 'Feb 2026',
+  '2026-03': 'Mar 2026',
+  '2026-04': 'Apr 2026',
+};
+function renderMonthSeg() {
+  const src = getForecastSource(state.selectedMsn);
+  const months = getMonthsForSource(src);
+  if (!months.includes(state.monthKey)) state.monthKey = months[0];
+  const dayCounts = {};
+  months.forEach(m => dayCounts[m] = 0);
+  getDaysForSource(src).forEach(d => { const m = monthKeyOf(d); if (dayCounts[m]!=null) dayCounts[m]++; });
+  const seg = document.getElementById('month-seg');
+  seg.innerHTML = months.map(m =>
+    `<button data-m="${m}" class="${m===state.monthKey?'active':''}">${MONTH_LABEL[m]||m}<span class="mc">${dayCounts[m]}d</span></button>`
+  ).join('');
+  seg.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    state.monthKey = b.dataset.m;
+    // pick first day of selected month if current dayKey is outside
+    const days = getDaysForSource(getForecastSource(state.selectedMsn)).filter(d => monthKeyOf(d)===state.monthKey);
+    if (!days.includes(state.dayKey)) state.dayKey = days[0];
+    renderMonthSeg();
+    renderDayGrid();
+    rerenderChart();
+  }));
+}
+function renderDayGrid() {
+  const src = getForecastSource(state.selectedMsn);
+  const allDays = getDaysForSource(src);
+  const days = allDays.filter(d => monthKeyOf(d) === state.monthKey);
+  const grid = document.getElementById('day-grid');
+  // 'all' button (scoped to current month)
+  const labelize = d => {
+    const dt = new Date(d + 'T00:00:00');
+    return {num: dt.getDate(), wk: dt.toLocaleDateString('en-US',{weekday:'short'})};
+  };
+  const allBtn = `<button class="all-day ${state.dayKey==='all'?'active':''}" data-d="all"><span class="dnum">All</span><span class="dwk">${days.length} days</span></button>`;
+  const dayBtns = days.map(d => {
+    const {num, wk} = labelize(d);
+    const ha = dayHasActual(src, d);
+    return `<button class="${state.dayKey===d?'active':''} ${ha?'has-actual':''}" data-d="${d}" title="${d}${ha?' · has held-out actuals':' · pure forecast'}"><span class="dnum">${num}</span><span class="dwk">${wk}</span></button>`;
+  });
+  grid.innerHTML = allBtn + dayBtns.join('');
+  grid.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    state.dayKey = b.dataset.d;
+    grid.querySelectorAll('button').forEach(x => x.classList.toggle('active', x===b));
+    rerenderChart();
+  }));
+}
+
+/* ----- meter list ----- */
+function meterPasses(m) {
+  const f = state.filter;
+  const h = healthClass(m.backtest_mape);
+  if (f === 'all') return true;
+  if (f === 'green' || f === 'amber' || f === 'red') return h === f;
+  if (f === '3PH' || f === '1PH') return (m.phase || '').startsWith(f);
+  return true;
+}
+function renderMeterList() {
+  const list = document.getElementById('meter-list');
+  let filtered = meters.filter(meterPasses);
+  if (state.sort === 'backtest_asc')  filtered.sort((a,b)=>(a.backtest_mape ?? 9999)-(b.backtest_mape ?? 9999));
+  if (state.sort === 'backtest_desc') filtered.sort((a,b)=>(b.backtest_mape ?? -1)-(a.backtest_mape ?? -1));
+  if (state.sort === 'bundle_asc')    filtered.sort((a,b)=>(a.bundle_holdout_mape ?? 9999)-(b.bundle_holdout_mape ?? 9999));
+  if (state.sort === 'msn')           filtered.sort((a,b)=>a.msn.localeCompare(b.msn));
+  document.getElementById('meter-count').textContent = `${filtered.length} of ${meters.length}`;
+  document.getElementById('fleet-val').textContent = `${G.n_meters_modeled} meters · ${fmtPct(G.mean_mape_real)}% mean backtest`;
+  list.innerHTML = filtered.map(m => {
+    const cls = healthClass(m.backtest_mape);
+    const pct = m.backtest_mape == null ? 0 : Math.min(100, m.backtest_mape * 1.2);
+    const colorVar = cls === 'green' ? 'var(--green)' : cls === 'amber' ? 'var(--amber)' : 'var(--red)';
+    const bundleStr = m.bundle_holdout_mape != null ? `bundle ${fmtPct(m.bundle_holdout_mape)}%` : 'bundle —';
+    return `
+      <div class="meter-row ${state.selectedMsn === m.msn ? 'selected' : ''}" data-msn="${m.msn}">
+        <div class="msn">${m.msn}</div>
+        <div class="mape ${cls}">${fmtPct(m.backtest_mape ?? 0)}%</div>
+        <div class="meta">
+          <span class="pill tier">${(m.tier||'').replace(' (0.5-1.5k)','').replace(' (<500)','').replace(' (1.5k+)','')}</span>
+          <span class="pill phase">${m.phase||''}</span>
+        </div>
+        <div class="mape-sub">${bundleStr}</div>
+        <div class="bar"><span style="width:${pct}%; background:${colorVar}"></span></div>
+      </div>
+    `;
+  }).join('');
+  list.querySelectorAll('.meter-row').forEach(r => r.addEventListener('click', () => {
+    state.selectedMsn = r.dataset.msn;
+    document.getElementById('fleet-row').classList.remove('selected');
+    renderMeterList();
+    renderMonthSeg();
+    renderDayGrid();
+    rerenderChart();
+  }));
+  const fr = document.getElementById('fleet-row');
+  fr.classList.toggle('selected', state.selectedMsn === '__FLEET__');
+  fr.onclick = () => { state.selectedMsn = '__FLEET__'; renderMeterList(); renderMonthSeg(); renderDayGrid(); rerenderChart(); };
+}
+
+/* ----- filter buttons ----- */
+function wireFilterButtons() {
+  document.querySelectorAll('#filter-row button').forEach(b => b.addEventListener('click', () => {
+    state.filter = b.dataset.filt;
+    document.querySelectorAll('#filter-row button').forEach(x => x.classList.toggle('active', x === b));
+    renderMeterList();
+  }));
+  document.querySelectorAll('#sort-seg button').forEach(b => b.addEventListener('click', () => {
+    state.sort = b.dataset.sort;
+    document.querySelectorAll('#sort-seg button').forEach(x => x.classList.toggle('active', x === b));
+    renderMeterList();
+  }));
+}
+
+/* ----- chart ----- */
+function getActiveSeries() {
+  const g = GRANS[state.granIdx].min;
+  const isFleet = state.selectedMsn === '__FLEET__';
+  const src = isFleet ? fleet : meters.find(x => x.msn === state.selectedMsn);
+  if (!src) return null;
+  const fcFiltTs = filterByDay(src.forecast_ts, src.forecast_kwh);
+  const fcFiltLo = filterByDay(src.forecast_ts, src.forecast_lo);
+  const fcFiltHi = filterByDay(src.forecast_ts, src.forecast_hi);
+  const fcFiltAc = filterByDay(src.forecast_ts, src.actual_kwh);
+  const h = bucketize(src.history_ts, src.history_kwh, g, false);
+  const f  = bucketize(fcFiltTs.ts, fcFiltTs.values, g, false);
+  const lo = bucketize(fcFiltLo.ts, fcFiltLo.values, g, false);
+  const hi = bucketize(fcFiltHi.ts, fcFiltHi.values, g, false);
+  const a  = bucketize(fcFiltAc.ts, fcFiltAc.values, g, true);
+  return {h, f, lo, hi, a, m: isFleet ? null : src, isFleet};
+}
+
+let tooltipDiv;
+function ensureTooltip() {
+  if (!tooltipDiv) {
+    tooltipDiv = document.createElement('div');
+    tooltipDiv.className = 'tt';
+    tooltipDiv.style.display = 'none';
+    document.querySelector('.chart-host').appendChild(tooltipDiv);
+  }
+  return tooltipDiv;
+}
+
+function renderDayBanner(isFleet, src) {
+  const host = document.getElementById('day-banner-host');
+  if (state.dayKey === 'all') {
+    host.innerHTML = `<div class="day-banner verified"><span class="ico">MIXED</span><span>Showing the entire ${MONTH_LABEL[state.monthKey]} window. Verified-day metrics aggregate across days where actuals exist; pure-forecast days are excluded from the metric strip.</span></div>`;
+    return;
+  }
+  const verified = isVerifiedDay(state.dayKey);
+  const dt = new Date(state.dayKey + 'T00:00:00');
+  const wkLong = dt.toLocaleDateString('en-US',{weekday:'long', month:'short', day:'numeric', year:'numeric'});
+  if (verified) {
+    host.innerHTML = `<div class="day-banner verified"><span class="ico">VERIFIED</span><span><strong>${wkLong}</strong> · model output is being scored against MDMS truth the model never saw. Metrics below are real out-of-sample numbers.</span><span class="why">a11 · a23</span></div>`;
+  } else {
+    host.innerHTML = `<div class="day-banner forecast-only"><span class="ico">PURE FORECAST</span><span><strong>${wkLong}</strong> · sits beyond the data window. Forecast curve and q10–q90 band are real model output; no actuals exist to score against.</span><span class="why">a25</span></div>`;
+  }
+}
+
+function renderChart() {
+  const data = getActiveSeries();
+  if (!data) return;
+  const gran = GRANS[state.granIdx];
+  const isFleet = data.isFleet;
+  const m = data.m;
+  const src = isFleet ? fleet : m;
+
+  // Title block
+  const titleEl = document.getElementById('chart-title');
+  const subEl = document.getElementById('chart-sub');
+  const mapePill = document.getElementById('chart-mape-pill');
+  if (isFleet) {
+    titleEl.innerHTML = `Fleet aggregate <span class="gran-tag ${gran.cls}">${gran.label}</span>`;
+    subEl.textContent = `Sum across ${G.n_meters_modeled} modeled meters · ${G.history_window_days}d history before cutoff + 76d forward forecast (8d backtest + 70d pure)`;
+    mapePill.innerHTML = `<span class="pill ${healthClass(G.mean_mape_real)}">mean ${fmtPct(G.mean_mape_real)}% · 8-day backtest MAPE</span>`;
+  } else {
+    titleEl.innerHTML = `Meter <span class="mono">${m.msn}</span> <span class="gran-tag ${gran.cls}">${gran.label}</span>`;
+    subEl.textContent = `${m.tier} · ${m.phase} · trained through ${m.train_cutoff.slice(0,10)} · backtest evaluated on ${m.n_eval_blocks} of 384 expected blocks`;
+    const bt = `<span class="pill ${healthClass(m.backtest_mape)}">${fmtPct(m.backtest_mape ?? 0)}% backtest</span>`;
+    const bh = m.bundle_holdout_mape != null ? ` <span class="pill ${healthClass(m.bundle_holdout_mape)}">${fmtPct(m.bundle_holdout_mape)}% bundle</span>` : '';
+    mapePill.innerHTML = bt + bh;
+  }
+
+  renderDayBanner(isFleet, src);
+
+  // Legend
+  const legend = document.getElementById('legend');
+  const dayLabel = state.dayKey === 'all' ? `${MONTH_LABEL[state.monthKey]||state.monthKey}` : state.dayKey;
+  legend.innerHTML = `
+    <span class="it" style="color:var(--muted-2)"><span class="sw" style="background:var(--muted)"></span>history (${G.history_window_days}d before cutoff)</span>
+    <span class="it" style="color:var(--teal)"><span class="sw" style="background:var(--teal)"></span>v4 forecast (${dayLabel})</span>
+    <span class="it" style="color:var(--teal)"><span class="sw area" style="background:var(--teal-soft)"></span>q10–q90 confidence</span>
+    <span class="it" style="color:var(--paper)"><span class="sw dash"></span>held-out actual (verified days only)</span>
+  `;
+
+  // Chart geometry
+  const svg = d3.select('#chart');
+  svg.selectAll('*').remove();
+  const host = document.querySelector('.chart-host');
+  const W = host.clientWidth - 28;
+  const H = 360;
+  const M = {top: 12, right: 18, bottom: 28, left: 56};
+  svg.attr('viewBox', `0 0 ${W} ${H}`);
+
+  const allTs = [...data.h.ts, ...data.f.ts];
+  const allKwh = [];
+  data.h.kwh.forEach(v => v != null && allKwh.push(v));
+  data.f.kwh.forEach(v => v != null && allKwh.push(v));
+  data.lo.kwh.forEach(v => v != null && allKwh.push(v));
+  data.hi.kwh.forEach(v => v != null && allKwh.push(v));
+  data.a.kwh.forEach(v => v != null && allKwh.push(v));
+
+  const xMin = d3.min(allTs);
+  const xMax = d3.max(allTs);
+  const yMax = (d3.max(allKwh) || 1) * 1.10;
+  const yMin = 0;
+
+  const x = d3.scaleTime().domain([xMin, xMax]).range([M.left, W - M.right]);
+  const y = d3.scaleLinear().domain([yMin, yMax]).range([H - M.bottom, M.top]);
+
+  const g = svg.append('g');
+  y.ticks(5).forEach(t => {
+    g.append('line').attr('class','gridline')
+      .attr('x1', M.left).attr('x2', W - M.right).attr('y1', y(t)).attr('y2', y(t));
+  });
+
+  // forecast band area
+  const bandData = data.f.ts.map((t, i) => ({t, lo: data.lo.kwh[i], hi: data.hi.kwh[i]}))
+    .filter(d => d.lo != null && d.hi != null);
+  const area = d3.area()
+    .x(d => x(d.t))
+    .y0(d => y(d.lo))
+    .y1(d => y(d.hi))
+    .curve(d3.curveMonotoneX);
+  g.append('path').attr('d', area(bandData))
+    .attr('fill', 'var(--teal-soft)').attr('stroke', 'none');
+
+  const lineH = d3.line()
+    .defined(d => d.v != null)
+    .x(d => x(d.t)).y(d => y(d.v))
+    .curve(d3.curveMonotoneX);
+
+  const histData = data.h.ts.map((t, i) => ({t, v: data.h.kwh[i]}));
+  g.append('path').attr('d', lineH(histData))
+    .attr('fill','none').attr('stroke','#71717a').attr('stroke-width', 1.4);
+
+  const fcData = data.f.ts.map((t, i) => ({t, v: data.f.kwh[i]}));
+  g.append('path').attr('d', lineH(fcData))
+    .attr('fill','none').attr('stroke','var(--teal)').attr('stroke-width', 2.2);
+
+  const actData = data.f.ts.map((t, i) => ({t, v: data.a.kwh[i]}));
+  g.append('path').attr('d', lineH(actData))
+    .attr('fill','none').attr('stroke','var(--paper)').attr('stroke-width', 1.6).attr('stroke-dasharray','4 3');
+
+  // forecast-start vertical marker (only when we have history before forecast)
+  if (data.h.ts.length && data.f.ts.length && data.h.ts[data.h.ts.length-1] < data.f.ts[0]) {
+    const fs = data.f.ts[0];
+    g.append('line')
+      .attr('x1', x(fs)).attr('x2', x(fs))
+      .attr('y1', M.top).attr('y2', H - M.bottom)
+      .attr('stroke', 'var(--teal)').attr('stroke-dasharray','3 3').attr('opacity', 0.6);
+    g.append('text')
+      .attr('x', x(fs) + 6).attr('y', M.top + 12)
+      .attr('fill', 'var(--teal)').attr('font-size', '10.5px')
+      .attr('font-family', 'JetBrains Mono, monospace')
+      .text('forecast →');
+  }
+
+  const xAxis = d3.axisBottom(x).ticks(Math.min(8, Math.max(4, Math.floor(W/130))))
+    .tickFormat(d => {
+      const fmt = (xMax - xMin) > 5*86400000 ? d3.timeFormat('%b %d') : d3.timeFormat('%b %d · %H:%M');
+      return fmt(d);
+    });
+  const yAxis = d3.axisLeft(y).ticks(5).tickFormat(d => d3.format(',.1f')(d));
+  svg.append('g').attr('class','axis').attr('transform', `translate(0, ${H - M.bottom})`).call(xAxis);
+  svg.append('g').attr('class','axis').attr('transform', `translate(${M.left}, 0)`).call(yAxis);
+  svg.append('text')
+    .attr('x', M.left).attr('y', M.top - 2)
+    .attr('fill','var(--muted-2)').attr('font-size','10.5px')
+    .attr('font-family','JetBrains Mono, monospace')
+    .text(`kWh per ${gran.label} block`);
+
+  // hover
+  const tt = ensureTooltip();
+  const focusG = g.append('g').style('display','none');
+  focusG.append('line').attr('class','hover-line').attr('y1', M.top).attr('y2', H - M.bottom);
+  const dotF = focusG.append('circle').attr('r', 4).attr('class','hover-marker').attr('fill','var(--teal)');
+  const dotA = focusG.append('circle').attr('r', 4).attr('class','hover-marker').attr('fill','var(--paper)');
+
+  const allPoints = [
+    ...histData.map(d => ({...d, kind:'history'})),
+    ...fcData.map((d, i) => ({...d, actual: data.a.kwh[i], lo: data.lo.kwh[i], hi: data.hi.kwh[i], kind:'forecast'})),
+  ];
+  const overlay = svg.append('rect')
+    .attr('x', M.left).attr('y', M.top)
+    .attr('width', W - M.left - M.right).attr('height', H - M.top - M.bottom)
+    .attr('fill', 'transparent');
+
+  overlay.on('mousemove', function(ev) {
+    const [mx, my] = d3.pointer(ev);
+    const tx = x.invert(mx);
+    let nearest = allPoints[0]; let dmin = Infinity;
+    allPoints.forEach(p => {
+      const d = Math.abs(p.t - tx);
+      if (d < dmin) { dmin = d; nearest = p; }
+    });
+    focusG.style('display', null);
+    focusG.select('.hover-line').attr('x1', x(nearest.t)).attr('x2', x(nearest.t));
+    if (nearest.kind === 'forecast') {
+      dotF.style('display', null).attr('cx', x(nearest.t)).attr('cy', y(nearest.v ?? 0));
+      if (nearest.actual != null) dotA.style('display', null).attr('cx', x(nearest.t)).attr('cy', y(nearest.actual));
+      else dotA.style('display','none');
+    } else {
+      dotF.style('display', null).attr('cx', x(nearest.t)).attr('cy', y(nearest.v ?? 0)).attr('fill','var(--muted)');
+      dotA.style('display','none');
+    }
+    let html = `<div class="ts">${d3.timeFormat('%a %b %d · %H:%M')(nearest.t)}  ·  ${gran.label} block</div>`;
+    if (nearest.kind === 'forecast') {
+      html += `<div class="row"><span class="k">forecast</span><span class="v teal">${fmtKwh(nearest.v)} kWh</span></div>`;
+      if (nearest.lo != null && nearest.hi != null)
+        html += `<div class="row"><span class="k">q10–q90</span><span class="v">${fmtKwh(nearest.lo)} – ${fmtKwh(nearest.hi)}</span></div>`;
+      if (nearest.actual != null) {
+        html += `<div class="row"><span class="k">actual (held-out)</span><span class="v act">${fmtKwh(nearest.actual)} kWh</span></div>`;
+        const delta = nearest.v - nearest.actual;
+        const pct = nearest.actual > 0 ? (delta / nearest.actual) * 100 : null;
+        html += `<div class="row"><span class="k">delta</span><span class="v delta">${delta>=0?'+':''}${fmtKwh(delta)} (${pct!=null?(pct>=0?'+':'')+fmtPct(pct)+'%':'—'})</span></div>`;
+      } else {
+        html += `<div class="row"><span class="k">actual</span><span class="v" style="color:#a78bfa">— pure forecast</span></div>`;
+      }
+    } else {
+      html += `<div class="row"><span class="k">history actual</span><span class="v">${fmtKwh(nearest.v)} kWh</span></div>`;
+    }
+    tt.innerHTML = html;
+    tt.style.display = 'block';
+    tt.style.left = (mx + 6) + 'px';
+    tt.style.top  = (my + 6) + 'px';
+  }).on('mouseleave', function() {
+    focusG.style('display','none');
+    tt.style.display = 'none';
+  });
+
+  // metrics computed on the day-filtered, granularity-bucketed series
+  const metrics = computeMetrics(data.f.kwh, data.a.kwh, data.lo.kwh, data.hi.kwh, data.f.ts);
+  const blockMetrics = {};
+  ['night','morning','solar','peak'].forEach(b => {
+    blockMetrics[b] = metricsOfBlock(data.f.kwh, data.a.kwh, data.f.ts, b);
+  });
+
+  renderMetricsStrip(metrics, gran);
+  renderBlockQuad(isFleet, m, blockMetrics, gran);
+  renderRightPanel(isFleet, m, gran, metrics);
+}
+
+function renderMetricsStrip(metrics, gran) {
+  const root = document.getElementById('metrics-strip');
+  if (!metrics || !metrics.n) {
+    const isPure = state.dayKey !== 'all' && !isVerifiedDay(state.dayKey);
+    root.innerHTML = `<div class="metric-cell empty">
+      <div class="val">${isPure ? 'No held-out actuals on this day · pure forecast (a25)' : 'No actuals in selected window'}</div>
+      <div class="sub">${isPure
+        ? 'This day sits beyond the data window. The forecast curve and q10–q90 band are real model output; we will not synthesise a MAPE against an unknown future. Switch to a verified day (any Feb 5–12) to see scoring.'
+        : 'No paired (forecast, actual) blocks in the selected day/granularity. Pick a different day or widen to All.'}</div>
+    </div>`;
+    return;
+  }
+  const clsMape = metrics.mape == null ? '' : metrics.mape < 8 ? 'good' : metrics.mape <= 12 ? 'warn' : 'bad';
+  const clsCov = metrics.coverage == null ? '' : metrics.coverage >= 75 ? 'good' : metrics.coverage >= 60 ? 'warn' : 'bad';
+  const clsR2 = metrics.r2 == null ? '' : metrics.r2 >= 0.85 ? 'good' : metrics.r2 >= 0.6 ? 'warn' : 'bad';
+  const clsBias = metrics.mbe == null ? '' : Math.abs(metrics.mbe) < 0.05 ? 'good' : Math.abs(metrics.mbe) < 0.20 ? 'warn' : 'bad';
+  const biasSign = metrics.mbe == null ? '' : metrics.mbe > 0 ? 'over' : metrics.mbe < 0 ? 'under' : 'flat';
+  const cards = [
+    {lbl:'MAPE',  cls: clsMape, val: metrics.mape == null ? '—' : fmtPct(metrics.mape)+'%', sub:`mean abs % error · per ${gran.label} block (n=${metrics.n})`, title:'Mean Absolute Percentage Error. Tiny-actual blocks (<1 Wh) excluded.'},
+    {lbl:'MAE',   cls:'',       val: fmtPct(metrics.mae)+' kWh', sub:`mean abs error per ${gran.label} block`, title:'Mean Absolute Error in kWh per selected block.'},
+    {lbl:'RMSE',  cls:'',       val: fmtPct(metrics.rmse)+' kWh', sub:`penalises large misses · per ${gran.label}`, title:'Root Mean Squared Error in kWh.'},
+    {lbl:'MBE',   cls: clsBias, val: (metrics.mbe>=0?'+':'')+fmtPct(metrics.mbe)+' kWh', sub:`${biasSign} by ${Math.abs(metrics.mbe).toFixed(3)} kWh/block`, title:'Mean Bias Error. Positive = model over-forecasts, negative = under-forecasts.'},
+    {lbl:'sMAPE', cls: clsMape, val: metrics.smape == null ? '—' : fmtPct(metrics.smape)+'%', sub:'symmetric · robust to tiny actuals', title:'Symmetric MAPE — 2·|p-a|/(|p|+|a|).'},
+    {lbl:'R²',    cls: clsR2,   val: metrics.r2 == null ? '—' : metrics.r2.toFixed(3), sub:'share of variance explained', title:'Coefficient of determination. 1 = perfect, 0 = no better than predicting the window mean.'},
+    {lbl:'Coverage', cls: clsCov, val: metrics.coverage == null ? '—' : fmtPctNoDec(metrics.coverage)+'%', sub:'actuals inside q10–q90 band (target ~80%)', title:'Fraction of held-out actuals falling inside the q10/q90 quantile band.'},
+    {lbl:'Worst block', cls:'', val: metrics.worst ? fmtPct(metrics.worst.e)+'%' : '—', sub: metrics.worst ? d3.timeFormat('%a %H:%M')(new Date(metrics.worst.t)) + ' · p '+fmtPct(metrics.worst.p)+' a '+fmtPct(metrics.worst.a) : '—', title:'Single block with largest percent error in selected window.'},
+  ];
+  root.innerHTML = cards.map(c => `
+    <div class="metric-cell ${c.cls}" title="${c.title}">
+      <div class="lbl">${c.lbl}<span class="help">ⓘ</span></div>
+      <div class="val">${c.val}</div>
+      <div class="sub">${c.sub}</div>
+    </div>
+  `).join('');
+}
+
+function renderBlockQuad(isFleet, m, blockMetrics, gran) {
+  const root = document.getElementById('block-quad');
+  const blocks = ['night','morning','solar','peak'];
+  const labels = {night:'23–06 night', morning:'06–10 morning', solar:'10–16 solar', peak:'16–23 peak'};
+  const isPure = state.dayKey !== 'all' && !isVerifiedDay(state.dayKey);
+  root.innerHTML = blocks.map(b => {
+    const bm = blockMetrics[b];
+    const real = bm?.mape;
+    const cls = real == null ? 'muted' : healthClass(real);
+    const trainRef = (!isFleet && m && m.historical_block_mape?.[b]) ? m.historical_block_mape[b] : null;
+    const delta = (real != null && trainRef != null) ? real - trainRef : null;
+    const subline = delta != null
+      ? `${(delta>=0?'+':'')+fmtPct(delta)}pp vs train · n=${bm.n}`
+      : (bm && bm.n ? `${bm.n} blocks · MAE ${fmtPct(bm.mae||0)} kWh`
+                    : (isPure ? 'pure forecast — no truth' : '—'));
+    return `
+      <div class="block-cell ${cls}">
+        <div class="lbl">${labels[b]} · ${gran.label}</div>
+        <div class="val">${real == null ? (isPure ? '—' : '—') : fmtPct(real)+'%'}</div>
+        <div class="delta">${subline}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderRightPanel(isFleet, m, gran, metrics) {
+  const root = document.getElementById('right-panel');
+  const desc = GRAN_DESC[gran.cls];
+  const granBox = `
+    <div class="gran-context ${gran.cls}">
+      <strong>${desc.tag} · ${gran.label}</strong>
+      <span>${desc.text}</span>
+    </div>
+  `;
+  const isPure = state.dayKey !== 'all' && !isVerifiedDay(state.dayKey);
+  const isAll = state.dayKey === 'all';
+  const dayBoxCls = isAll ? 'verified' : (isPure ? 'forecast-only' : 'verified');
+  const dayBoxText = isAll
+    ? `Showing the entire ${MONTH_LABEL[state.monthKey]} window. Backtest actuals (Feb 5–12) where available; forecast-only days otherwise.`
+    : (isPure
+        ? `Pure forecast — no held-out actuals exist for this day. Forecast and band are real model output. Metrics intentionally blank — see a25.`
+        : `Verified day — model is being scored against MDMS truth it never saw. Backtest MAPE here is real out-of-sample.`);
+  const dayBoxStrong = isAll ? `MIXED · ${MONTH_LABEL[state.monthKey]}` : (isPure ? `PURE FORECAST · ${state.dayKey}` : `VERIFIED · ${state.dayKey}`);
+  const dayBox = `
+    <div class="day-context ${dayBoxCls}">
+      <strong>${dayBoxStrong}</strong>
+      <span>${dayBoxText}</span>
+    </div>
+  `;
+  const dayLabel = isAll ? `All ${MONTH_LABEL[state.monthKey]}` : state.dayKey;
+  const windowSummary = `
+    <div class="panel-section">
+      <h3>Window in view</h3>
+      <div class="kv"><span class="k">day</span><span class="v">${dayLabel}</span></div>
+      <div class="kv"><span class="k">granularity</span><span class="v">${gran.label} (${desc.tag.toLowerCase()})</span></div>
+      <div class="kv"><span class="k">paired blocks</span><span class="v">${metrics && metrics.n ? metrics.n : 0}</span></div>
+      <div class="kv"><span class="k">Σ forecast</span><span class="v">${metrics && metrics.sum_p != null ? fmtPct(metrics.sum_p) + ' kWh' : (isPure ? 'forecast only' : '—')}</span></div>
+      <div class="kv"><span class="k">Σ actual</span><span class="v">${metrics && metrics.sum_a != null ? fmtPct(metrics.sum_a) + ' kWh' : (isPure ? 'no truth' : '—')}</span></div>
+      <div class="kv"><span class="k">Σ delta</span><span class="v">${metrics && metrics.sum_p != null && metrics.sum_a != null ? ((metrics.sum_p - metrics.sum_a >= 0)?'+':'') + fmtPct(metrics.sum_p - metrics.sum_a) + ' kWh' : '—'}</span></div>
+    </div>
+  `;
+  if (isFleet) {
+    root.innerHTML = `
+      <div class="panel-section">
+        <h3>Granularity context</h3>
+        ${granBox}
+      </div>
+      <div class="panel-section">
+        <h3>Day context</h3>
+        ${dayBox}
+      </div>
+      ${windowSummary}
+      <div class="panel-section">
+        <h3>Fleet · 8-day backtest reference</h3>
+        <div class="kv"><span class="k">meters modeled</span><span class="v">${G.n_meters_modeled}</span></div>
+        <div class="kv"><span class="k">meters uploaded</span><span class="v">${G.n_meters_uploaded}</span></div>
+        <div class="kv"><span class="k">data window</span><span class="v">${G.data_window.start.slice(0,10)} → ${G.data_window.end.slice(0,10)}</span></div>
+        <div class="kv"><span class="k">backtest window</span><span class="v">${G.backtest_window.start.slice(0,10)} → ${G.backtest_window.end.slice(0,10)}</span></div>
+        <div class="kv"><span class="k">forecast horizon</span><span class="v">${G.forecast_horizon_days} days (8 verified + 70 pure)</span></div>
+        <div class="kv"><span class="k">8d mean MAPE</span><span class="v">${fmtPct(G.mean_mape_real)}%</span></div>
+        <div class="kv"><span class="k">median MAPE</span><span class="v">${fmtPct(G.median_mape_real)}%</span></div>
+        <div class="kv"><span class="k">best · worst</span><span class="v">${fmtPct(G.min_mape_real)}% · ${fmtPct(G.max_mape_real)}%</span></div>
+        <div class="kv"><span class="k">green / amber / red</span><span class="v">${G.green} / ${G.amber} / ${G.red}</span></div>
+      </div>
+      <div class="panel-section">
+        <h3>Applies</h3>
+        <div class="kv"><span class="k">a17</span><span class="v">simple-sum aggregate</span></div>
+        <div class="kv"><span class="k">a06</span><span class="v">one model per meter</span></div>
+        <div class="kv"><span class="k">a11</span><span class="v">backtest = real OOS</span></div>
+        <div class="kv"><span class="k">a23</span><span class="v">DOW priming, no cascade</span></div>
+        <div class="kv"><span class="k">a24</span><span class="v">backtest ≠ bundle MAPE</span></div>
+        ${isPure ? '<div class="kv"><span class="k">a25</span><span class="v">pure-forecast tail</span></div>' : ''}
+        ${gran.cls === 'derived' ? '<div class="kv"><span class="k">a16</span><span class="v">sub-30 derived</span></div>' : ''}
+        ${gran.cls === 'aggr' ? '<div class="kv"><span class="k">a15</span><span class="v">aggregation honest</span></div>' : ''}
+      </div>
+    `;
+    return;
+  }
+  const btb = m.backtest_block_mape || {};
+  const hbm = m.historical_block_mape || {};
+  root.innerHTML = `
+    <div class="panel-section">
+      <h3>Granularity context</h3>
+      ${granBox}
+    </div>
+    <div class="panel-section">
+      <h3>Day context</h3>
+      ${dayBox}
+    </div>
+    ${windowSummary}
+    <div class="panel-section">
+      <h3>Meter</h3>
+      <div class="kv"><span class="k">MSN</span><span class="v">${m.msn}</span></div>
+      <div class="kv"><span class="k">tier</span><span class="v">${m.tier||'—'}</span></div>
+      <div class="kv"><span class="k">phase</span><span class="v">${m.phase||'—'}${m.phase_scs && m.phase_scs!==m.phase ? ' / SCS '+m.phase_scs : ''}</span></div>
+      <div class="kv"><span class="k">SCNO</span><span class="v">${m.scno||'—'}</span></div>
+      <div class="kv"><span class="k">UKSCNO</span><span class="v">${m.ukscno||'—'}</span></div>
+      <div class="kv"><span class="k">train cutoff</span><span class="v">${m.train_cutoff.slice(0,10)}</span></div>
+    </div>
+    <div class="panel-section">
+      <h3>Reference MAPEs (a24)</h3>
+      <div class="kv"><span class="k">bundle holdout (in-pipeline)</span><span class="v">${m.bundle_holdout_mape != null ? fmtPct(m.bundle_holdout_mape)+'%' : '—'}</span></div>
+      <div class="kv"><span class="k">v3 backtest (8d, 30 min)</span><span class="v">${fmtPct(m.backtest_mape ?? 0)}%</span></div>
+      <div class="kv"><span class="k">backtest blocks evaluated</span><span class="v">${m.n_eval_blocks} of 384</span></div>
+      <div class="kv"><span class="k">backtest night</span><span class="v">${btb.night != null ? fmtPct(btb.night)+'%' : '—'} <span style="color:var(--muted)">vs train ${hbm.night != null ? fmtPct(hbm.night)+'%' : '—'}</span></span></div>
+      <div class="kv"><span class="k">backtest morning</span><span class="v">${btb.morning != null ? fmtPct(btb.morning)+'%' : '—'} <span style="color:var(--muted)">vs train ${hbm.morning != null ? fmtPct(hbm.morning)+'%' : '—'}</span></span></div>
+      <div class="kv"><span class="k">backtest solar</span><span class="v">${btb.solar != null ? fmtPct(btb.solar)+'%' : '—'} <span style="color:var(--muted)">vs train ${hbm.solar != null ? fmtPct(hbm.solar)+'%' : '—'}</span></span></div>
+      <div class="kv"><span class="k">backtest peak</span><span class="v">${btb.peak != null ? fmtPct(btb.peak)+'%' : '—'} <span style="color:var(--muted)">vs train ${hbm.peak != null ? fmtPct(hbm.peak)+'%' : '—'}</span></span></div>
+    </div>
+    <div class="panel-section">
+      <h3>Applies</h3>
+      <div class="kv"><span class="k">a06</span><span class="v">one model per meter</span></div>
+      <div class="kv"><span class="k">a07</span><span class="v">q10/q90 band</span></div>
+      <div class="kv"><span class="k">a08</span><span class="v">tier hyperparameters</span></div>
+      <div class="kv"><span class="k">a09</span><span class="v">bias gate</span></div>
+      <div class="kv"><span class="k">a11</span><span class="v">backtest = real OOS</span></div>
+      <div class="kv"><span class="k">a23</span><span class="v">DOW priming, no cascade</span></div>
+      <div class="kv"><span class="k">a24</span><span class="v">backtest ≠ bundle MAPE</span></div>
+      ${isPure ? '<div class="kv"><span class="k">a25</span><span class="v">pure-forecast tail</span></div>' : ''}
+      <div class="kv"><span class="k">a21</span><span class="v">metrics scoped to day+gran</span></div>
+      ${gran.cls === 'derived' ? '<div class="kv"><span class="k">a16</span><span class="v">sub-30 derived</span></div>' : ''}
+      ${gran.cls === 'aggr' ? '<div class="kv"><span class="k">a15</span><span class="v">aggregation honest</span></div>' : ''}
+    </div>
+  `;
+}
+
+function rerenderChart() { renderChart(); }
+
+/* ----- ledger ----- */
+function renderLedger() {
+  const cats = ['all', 'data', 'model', 'validation', 'product', 'commercial'];
+  const filt = document.getElementById('ledger-filters');
+  filt.innerHTML = cats.map(c =>
+    `<button data-c="${c}" class="${c===state.ledgerFilter?'active':''}">${c}</button>`
+  ).join('');
+  filt.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    state.ledgerFilter = b.dataset.c;
+    renderLedger();
+  }));
+  const grid = document.getElementById('ledger-grid');
+  grid.innerHTML = LEDGER
+    .filter(a => state.ledgerFilter === 'all' || a.cat === state.ledgerFilter)
+    .map(a => `
+      <div class="assumption">
+        <div class="top">
+          <span class="id">${a.id}</span>
+          <span><span class="cat ${a.cat}">${a.cat}</span><span class="tag ${a.tag}">${a.tag}</span></span>
+        </div>
+        <div class="title">${a.title}</div>
+        <div class="body">${a.body}</div>
+      </div>
+    `).join('');
+}
+
+/* ----- boot ----- */
+function boot() {
+  renderKpis();
+  renderGranSeg();
+  renderMeterList();
+  renderMonthSeg();
+  renderDayGrid();
+  wireFilterButtons();
+  renderChart();
+  renderLedger();
+  window.addEventListener('resize', () => rerenderChart());
+}
+boot();
+</script>
+</body>
+</html>

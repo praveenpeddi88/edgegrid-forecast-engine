@@ -1,0 +1,39 @@
+{
+  "context_cutoff": "2026-02-04T23:30:00",
+  "horizon_start": "2026-02-05T00:00:00",
+  "horizon_end": "2026-02-12T15:00:00",
+  "n_meters_run": 1,
+  "n_meters_ok": 1,
+  "summary": {
+    "bundle_mean": 13.76,
+    "bundle_median": 13.76,
+    "v3_mean": 65.73,
+    "v3_median": 65.73,
+    "v5_mean": 63.63,
+    "v5_median": 63.63,
+    "delta_mean_pp": 2.1,
+    "delta_median_pp": 2.1,
+    "n_under_5": 0,
+    "n_under_10": 0
+  },
+  "per_meter": [
+    {
+      "msn": "50143025",
+      "n_eval": 366,
+      "v5_mape": 63.63,
+      "v5_mae_wh": 24.8,
+      "v5_rmse_wh": 45.4,
+      "v5_block_mape": {
+        "night": NaN,
+        "morning": 54.17,
+        "solar": 69.36,
+        "peak": 50.07
+      },
+      "wallclock_s": 28.0,
+      "bundle_mape": 13.76,
+      "v3_backtest_mape": 65.73,
+      "tier": "Small (<500)",
+      "phase": "1PH"
+    }
+  ]
+}

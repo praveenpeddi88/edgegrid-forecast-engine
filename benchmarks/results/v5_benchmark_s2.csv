@@ -1,0 +1,43 @@
+msn,tier,n_holdout_days,n_holdout_slots,n_clean_slots,leaky_mape,leaky_mae,leaky_mbe,clean_mape,clean_mae,clean_mbe,leaky_cohort,clean_cohort,s1_holdout_mape
+50143025,Small (<500),99,4752,0,6.529,2.93,-0.12,,,,B: 5-10%,X: no post-cutoff data,10.25
+50154700,Medium (0.5-1.5k),54,2592,0,3.549,14.38,-1.72,,,,A: <4% (target),X: no post-cutoff data,3.41
+50186364,Medium (0.5-1.5k),58,2784,0,8.581,17.23,-3.86,,,,B: 5-10%,X: no post-cutoff data,16.76
+51057607,Small (<500),96,4608,0,6.778,13.41,-0.6,,,,B: 5-10%,X: no post-cutoff data,10.86
+53401842,Medium (0.5-1.5k),84,4026,0,3.121,22.44,0.61,,,,A: <4% (target),X: no post-cutoff data,6.73
+53401885,Medium (0.5-1.5k),82,3934,0,4.346,16.63,-1.75,,,,A': 4-5%,X: no post-cutoff data,5.49
+53403416,Small (<500),87,4176,0,5.108,20.6,-0.9,,,,B: 5-10%,X: no post-cutoff data,6.38
+53407938,Medium (0.5-1.5k),58,2780,0,2.881,12.08,-0.33,,,,A: <4% (target),X: no post-cutoff data,2.14
+53408407,Medium (0.5-1.5k),59,2831,0,2.443,22.29,-0.96,,,,A: <4% (target),X: no post-cutoff data,4.02
+53408951,Medium (0.5-1.5k),58,2784,0,4.648,23.18,-0.53,,,,A': 4-5%,X: no post-cutoff data,6.09
+65000228,Medium (0.5-1.5k),117,5614,0,3.728,18.53,0.64,,,,A: <4% (target),X: no post-cutoff data,7.28
+65001891,Medium (0.5-1.5k),112,5374,0,2.369,12.3,0.42,,,,A: <4% (target),X: no post-cutoff data,3.09
+65002231,Medium (0.5-1.5k),115,5516,0,2.714,16.72,-1.81,,,,A: <4% (target),X: no post-cutoff data,4.27
+65003102,Small (<500),115,5506,0,4.699,13.62,-0.74,,,,A': 4-5%,X: no post-cutoff data,4.05
+65003175,Medium (0.5-1.5k),114,5468,0,5.729,25.72,10.67,,,,B: 5-10%,X: no post-cutoff data,5.75
+65004669,Medium (0.5-1.5k),101,4844,0,2.931,19.62,-4.31,,,,A: <4% (target),X: no post-cutoff data,5.26
+65007036,Medium (0.5-1.5k),107,5134,0,4.149,20.59,-0.91,,,,A': 4-5%,X: no post-cutoff data,3.15
+65011155,Medium (0.5-1.5k),108,5180,0,2.426,17.29,-2.73,,,,A: <4% (target),X: no post-cutoff data,3.9
+65012662,Small (<500),107,5136,0,3.148,10.42,-1.19,,,,A: <4% (target),X: no post-cutoff data,4.07
+65015026,Small (<500),92,4416,0,7.74,21.07,5.17,,,,B: 5-10%,X: no post-cutoff data,5.42
+65015739,Small (<500),97,4654,0,2.813,8.55,1.05,,,,A: <4% (target),X: no post-cutoff data,3.58
+65017058,Medium (0.5-1.5k),108,5178,0,3.245,23.51,-3.36,,,,A: <4% (target),X: no post-cutoff data,4.3
+65021124,Medium (0.5-1.5k),108,5184,0,8.572,18.64,0.05,,,,B: 5-10%,X: no post-cutoff data,24.74
+65021169,Medium (0.5-1.5k),108,5184,0,10.385,87.03,-0.39,,,,C: 10-15%,X: no post-cutoff data,18.05
+65021964,Medium (0.5-1.5k),106,5088,0,3.203,11.76,-0.09,,,,A: <4% (target),X: no post-cutoff data,2.93
+65022302,Medium (0.5-1.5k),89,4270,0,4.829,19.55,-3.21,,,,A': 4-5%,X: no post-cutoff data,4.82
+65022501,Medium (0.5-1.5k),106,5080,0,2.28,14.88,-2.1,,,,A: <4% (target),X: no post-cutoff data,3.54
+65023781,Medium (0.5-1.5k),97,4650,0,2.339,14.39,-1.4,,,,A: <4% (target),X: no post-cutoff data,3.13
+65023784,Medium (0.5-1.5k),97,4652,0,5.228,25.04,-1.04,,,,B: 5-10%,X: no post-cutoff data,6.19
+65024185,Small (<500),62,2976,0,3.82,23.56,-0.66,,,,A: <4% (target),X: no post-cutoff data,4.8
+65024487,Small (<500),65,3118,0,3.352,14.99,0.31,,,,A: <4% (target),X: no post-cutoff data,4.18
+65025443,Medium (0.5-1.5k),82,3932,0,3.104,16.76,0.5,,,,A: <4% (target),X: no post-cutoff data,3.91
+65030697,Small (<500),71,3408,0,3.905,14.57,-0.53,,,,A: <4% (target),X: no post-cutoff data,4.9
+65041990,Medium (0.5-1.5k),48,2304,0,8.461,12.85,0.88,,,,B: 5-10%,X: no post-cutoff data,12.58
+65044028,Medium (0.5-1.5k),60,2877,0,2.682,20.47,-0.08,,,,A: <4% (target),X: no post-cutoff data,5.01
+65045250,Medium (0.5-1.5k),45,2158,0,2.224,9.24,-0.29,,,,A: <4% (target),X: no post-cutoff data,2.75
+65049719,Medium (0.5-1.5k),58,2784,0,4.988,26.38,-1.06,,,,A': 4-5%,X: no post-cutoff data,5.72
+67001151,HT (>5kWh),80,3840,0,11.748,205.52,-9.1,,,,C: 10-15%,X: no post-cutoff data,4.85
+67001818,HT (>5kWh),81,3888,0,3.224,98.57,-6.48,,,,A: <4% (target),X: no post-cutoff data,3.94
+67003234,HT (>5kWh),60,2880,0,4.492,145.72,-16.22,,,,A': 4-5%,X: no post-cutoff data,5.93
+67003309,HT (>5kWh),58,2782,0,9.35,141.89,1.76,,,,B: 5-10%,X: no post-cutoff data,14.41
+67003694,HT (>5kWh),53,2542,0,2.394,103.43,-4.14,,,,A: <4% (target),X: no post-cutoff data,3.78

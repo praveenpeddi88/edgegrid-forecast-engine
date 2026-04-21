@@ -1,0 +1,50 @@
+[Unit]
+Description=EdgeGrid Forecast Engine (FastAPI, v5)
+Documentation=https://github.com/praveenpeddi88/edgegrid-forecast-engine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=edgegrid
+Group=edgegrid
+WorkingDirectory=/opt/edgegrid-forecast-engine
+Environment=PYTHONPATH=/opt/edgegrid-forecast-engine/src
+Environment=EDGEGRID_ENV=production
+Environment=EDGEGRID_API_HOST=0.0.0.0
+Environment=EDGEGRID_API_PORT=8000
+# Point this at the venv uvicorn on the host:
+ExecStart=/opt/edgegrid-forecast-engine/.venv/bin/uvicorn \
+          edgegrid_forecast.api.main:app \
+          --host ${EDGEGRID_API_HOST} \
+          --port ${EDGEGRID_API_PORT} \
+          --workers 1 \
+          --log-level info
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/edgegrid-forecast-engine/logs /opt/edgegrid-forecast-engine/outputs
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+# Resource limits
+LimitNOFILE=65536
+MemoryHigh=6G
+MemoryMax=8G
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

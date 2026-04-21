@@ -48,10 +48,15 @@ from edgegrid_forecast.inference._features import (  # noqa: E402
 SMOKE_MSN_GATED = "67001151"   # gate=gated_out, MAPE=6.34%
 SMOKE_MSN_APPLIED = "67003234" # gate=applied,   MAPE=10.59%
 MODELS_DIR = REPO / "models" / "v4"
+BENCHMARK_CSV = REPO / "benchmarks" / "results" / "benchmark_strategy1_v4.csv"
 
 
 def _has_bundle(msn: str) -> bool:
     return (MODELS_DIR / f"{msn}.joblib").exists()
+
+
+def _has_benchmark_csv() -> bool:
+    return BENCHMARK_CSV.exists()
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -82,22 +87,28 @@ def test_load_model_missing_raises():
 # ════════════════════════════════════════════════════════════════════════════
 # MAPE parity vs benchmark CSV
 # ════════════════════════════════════════════════════════════════════════════
-@pytest.mark.skipif(not _has_bundle(SMOKE_MSN_GATED), reason="bundle not trained yet")
+@pytest.mark.skipif(
+    not _has_bundle(SMOKE_MSN_GATED) or not _has_benchmark_csv(),
+    reason="bundle or v4 benchmark CSV not available",
+)
 def test_mape_parity_gated():
     """Persisted bundle's holdout MAPE must match benchmark CSV for 67001151."""
     bundle = load_model(SMOKE_MSN_GATED)
-    benchmark = pd.read_csv(REPO / "benchmarks" / "results" / "benchmark_strategy1_v4.csv")
+    benchmark = pd.read_csv(BENCHMARK_CSV)
     benchmark["msn"] = benchmark["msn"].astype(str)
     row = benchmark[benchmark["msn"] == SMOKE_MSN_GATED].iloc[0]
     assert bundle["holdout_metrics"]["mape"] == pytest.approx(row["mape"], abs=0.01)
     assert bundle["bias_gate"] == row["bias_gate"]
 
 
-@pytest.mark.skipif(not _has_bundle(SMOKE_MSN_APPLIED), reason="bundle not trained yet")
+@pytest.mark.skipif(
+    not _has_bundle(SMOKE_MSN_APPLIED) or not _has_benchmark_csv(),
+    reason="bundle or v4 benchmark CSV not available",
+)
 def test_mape_parity_applied():
     """Second meter exercises the Phase B bias-correction path (gate=applied)."""
     bundle = load_model(SMOKE_MSN_APPLIED)
-    benchmark = pd.read_csv(REPO / "benchmarks" / "results" / "benchmark_strategy1_v4.csv")
+    benchmark = pd.read_csv(BENCHMARK_CSV)
     benchmark["msn"] = benchmark["msn"].astype(str)
     row = benchmark[benchmark["msn"] == SMOKE_MSN_APPLIED].iloc[0]
     assert bundle["holdout_metrics"]["mape"] == pytest.approx(row["mape"], abs=0.01)

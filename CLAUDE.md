@@ -1,0 +1,1 @@
+Use the files from working folder and build a forecasting engine that has MAPE less than 4% across all of the 42 meters, on the existing data and the future dates where we dont have the data. 

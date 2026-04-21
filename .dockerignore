@@ -1,0 +1,56 @@
+# ─── Version control / editor ──────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+.github
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+
+# ─── Python build artefacts ────────────────────────────────────────────────
+__pycache__
+*.py[cod]
+*.egg-info
+*.egg
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+build
+dist
+*.whl
+
+# ─── Virtual envs ──────────────────────────────────────────────────────────
+.venv
+venv
+env
+
+# ─── Jupyter / notebook scratchpads ────────────────────────────────────────
+.ipynb_checkpoints
+notebooks/**/*.ipynb_checkpoints
+
+# ─── Local outputs / logs ──────────────────────────────────────────────────
+outputs
+logs
+*.log
+
+# ─── Docker artefacts we don't want inside the image ───────────────────────
+Dockerfile
+.dockerignore
+docker-compose*.yml
+Makefile
+
+# ─── Secrets / env files ───────────────────────────────────────────────────
+.env
+.env.*
+*.pem
+*.key
+
+# ─── Large raw data not needed in the image ────────────────────────────────
+# (the image COPYs `data/` explicitly; keep raw intermediates out)
+data/raw
+data/tmp
+data/**/*.zip

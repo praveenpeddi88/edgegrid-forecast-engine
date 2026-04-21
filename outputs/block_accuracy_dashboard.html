@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>EdgeGrid - Block-Wise Forecast Accuracy</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%8A%3C/text%3E%3C/svg%3E">
+<meta property="og:title" content="EdgeGrid - Block-Wise Forecast Accuracy">
+<meta property="og:description" content="Per-meter per-cadence MAPE, cohort rollup, and 30-day forward forecast for the EdgeGrid 42-meter fleet.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  :root {
+    --ink:#09090b; --ink-2:#18181b; --ink-3:#27272a; --ink-4:#3f3f46;
+    --line:#27272a; --line-2:#3f3f46;
+    --muted:#71717a; --muted-2:#a1a1aa;
+    --paper:#fafaf9; --paper-2:#f4f4f5;
+    --teal:#14b8a6; --teal-2:#0d9488; --teal-soft:rgba(20,184,166,0.18);
+    --green:#10b981; --amber:#f59e0b; --red:#ef4444;
+    --green-soft:rgba(16,185,129,0.14); --amber-soft:rgba(245,158,11,0.14); --red-soft:rgba(239,68,68,0.14);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background: var(--ink); color: var(--paper);
+    font-family: 'Poppins', system-ui, sans-serif; font-size: 13px; line-height: 1.5; }
+  .mono, code { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace; }
+  ::selection { background: var(--teal); color: var(--ink); }
+
+  header.app {
+    border-bottom: 1px solid var(--line);
+    padding: 22px 28px 18px;
+    background: linear-gradient(180deg, #0a0a0c 0%, var(--ink) 100%);
+  }
+  .brand { font-weight: 700; font-size: 22px; letter-spacing: -0.01em; }
+  .brand .dot { color: var(--teal); margin: 0 6px; }
+  .strap { color: var(--muted); margin-top: 4px; font-size: 13px; }
+  .legend { margin-top: 10px; display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted-2); }
+  .legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+
+  main { padding: 22px 28px 60px; max-width: 1400px; margin: 0 auto; }
+  section { margin-bottom: 36px; }
+  .h2 { font-size: 16px; font-weight: 600; margin: 0 0 12px; letter-spacing: -0.01em; }
+  .h2 .sub { color: var(--muted); font-weight: 400; margin-left: 8px; font-size: 12.5px; }
+
+  /* Tiles */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+  .tile {
+    border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px;
+    background: var(--ink-2); position: relative; overflow: hidden;
+  }
+  .tile .cad { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .tile .stat-row { display: flex; gap: 16px; margin-top: 10px; align-items: baseline; }
+  .tile .stat { display: flex; flex-direction: column; }
+  .tile .stat .lbl { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .tile .stat .val { font-size: 18px; font-weight: 600; font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+  .tile .clear {
+    margin-top: 14px; font-family: 'JetBrains Mono', monospace; font-weight: 600;
+    font-size: 28px; line-height: 1.1;
+  }
+  .tile .clear .denom { color: var(--muted); font-size: 18px; }
+  .tile .clear-lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
+  .badge { position: absolute; top: 14px; right: 14px; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge.green { background: var(--green-soft); color: var(--green); }
+  .badge.amber { background: var(--amber-soft); color: var(--amber); }
+  .badge.red { background: var(--red-soft); color: var(--red); }
+  .tile.green { border-color: rgba(16,185,129,0.4); }
+  .tile.amber { border-color: rgba(245,158,11,0.4); }
+  .tile.red { border-color: rgba(239,68,68,0.4); }
+
+  /* Filters */
+  .filters {
+    border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px;
+    background: var(--ink-2); position: sticky; top: 0; z-index: 30;
+    display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start;
+  }
+  .ctrl { display: flex; flex-direction: column; gap: 6px; }
+  .ctrl-label { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button {
+    background: var(--ink); color: var(--muted-2); border: none; padding: 7px 12px; font-size: 12px;
+    cursor: pointer; font-family: inherit; border-right: 1px solid var(--line);
+  }
+  .seg button:last-child { border-right: none; }
+  .seg button:hover { color: var(--paper); background: var(--ink-3); }
+  .seg button.active { background: var(--teal); color: var(--ink); font-weight: 600; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    padding: 6px 11px; border-radius: 999px; border: 1px solid var(--line);
+    background: var(--ink); color: var(--muted-2); font-size: 12px; cursor: pointer; font-family: inherit;
+  }
+  .chip.active { background: var(--teal-soft); color: var(--teal); border-color: var(--teal-2); font-weight: 600; }
+  select.sort {
+    background: var(--ink); color: var(--paper); border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 10px; font-size: 12px; font-family: inherit;
+  }
+
+  /* Table */
+  .tbl-wrap { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--ink-2); }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line); }
+  th { background: var(--ink-3); color: var(--muted-2); font-weight: 600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.05em; }
+  tr:last-child td { border-bottom: none; }
+  td.num { font-family: 'JetBrains Mono', monospace; text-align: right; }
+  th.num { text-align: right; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  .status-chip { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .status-chip.green { background: var(--green-soft); color: var(--green); }
+  .status-chip.amber { background: var(--amber-soft); color: var(--amber); }
+  .status-chip.red { background: var(--red-soft); color: var(--red); }
+  .cohort-tag { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 600;
+    font-family: 'JetBrains Mono', monospace; background: var(--ink-3); color: var(--muted-2); }
+  .cohort-tag.A { background: rgba(16,185,129,0.18); color: var(--green); }
+  .cohort-tag.B { background: rgba(20,184,166,0.18); color: var(--teal); }
+  .cohort-tag.C { background: rgba(245,158,11,0.18); color: var(--amber); }
+  .cohort-tag.D { background: rgba(239,68,68,0.18); color: var(--red); }
+
+  /* Chart */
+  .chart-wrap { border: 1px solid var(--line); border-radius: 12px; padding: 16px; background: var(--ink-2); }
+  .chart-canvas-wrap { position: relative; height: 360px; }
+
+  /* Truth */
+  .truth { border-left: 3px solid var(--teal); background: var(--ink-2); padding: 18px 22px;
+    border-radius: 0 12px 12px 0; }
+  .truth p { margin: 0 0 12px; color: var(--paper-2); }
+  .truth p:last-child { margin-bottom: 0; }
+  .truth strong { color: var(--paper); }
+
+  footer { text-align: center; color: var(--muted); font-size: 11.5px; padding: 24px;
+    border-top: 1px solid var(--line); margin-top: 30px; }
+</style>
+</head>
+<body>
+
+<header class="app">
+  <div class="brand">EdgeGrid <span class="dot">.</span> Block-Wise Forecast Accuracy</div>
+  <div class="strap">Feb 5-12, 2026 backfill <span class="dot" style="color:var(--muted)">.</span> 42 meters <span class="dot" style="color:var(--muted)">.</span> 4 cadences</div>
+  <div class="legend">
+    <span><span class="swatch" style="background:var(--green)"></span>green &lt;5% MAPE</span>
+    <span><span class="swatch" style="background:var(--amber)"></span>amber 5-10%</span>
+    <span><span class="swatch" style="background:var(--red)"></span>red &gt;10%</span>
+  </div>
+</header>
+
+<main>
+
+  <section>
+    <div class="h2">Fleet headline <span class="sub">mean / median MAPE and meters clearing the 5% target</span></div>
+    <div class="tiles" id="fleet-tiles"></div>
+  </section>
+
+  <section>
+    <div class="h2">Filters</div>
+    <div class="filters">
+      <div class="ctrl">
+        <div class="ctrl-label">Cadence</div>
+        <div class="seg" id="cadence-seg"></div>
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-label">Cohort</div>
+        <div class="chips" id="cohort-chips"></div>
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-label">Sort</div>
+        <select class="sort" id="sort-sel">
+          <option value="mape_asc">MAPE asc</option>
+          <option value="mape_desc">MAPE desc</option>
+          <option value="kwh_desc">Total kWh desc</option>
+        </select>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="h2">Per-meter table <span class="sub" id="meter-count"></span></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Meter ID</th>
+            <th>Cohort</th>
+            <th class="num">MAPE (%)</th>
+            <th class="num">Median APE (%)</th>
+            <th class="num">p95 APE (%)</th>
+            <th class="num">MBE (kWh)</th>
+            <th class="num">Total actual kWh</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="meter-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="h2">Cohort rollup <span class="sub">mean MAPE per (cohort, cadence). Dashed line = 5% target.</span></div>
+    <div class="chart-wrap">
+      <div class="chart-canvas-wrap"><canvas id="cohortChart"></canvas></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="h2">Forward forecast preview <span class="sub" id="fwd-range"></span></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Meter ID</th>
+            <th>Cohort</th>
+            <th class="num">Total predicted kWh</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="fwd-tbody"></tbody>
+      </table>
+    </div>
+    <div style="color:var(--muted); font-size:12px; margin-top:10px;">
+      MAPE pending - actuals will flow in T+1 day per block.
+    </div>
+  </section>
+
+  <section>
+    <div class="h2">Truth statement</div>
+    <div class="truth">
+      <p><strong>The 5% MAPE target is not physically reachable at 15-min DAM cadence for all 42 meters on current data.</strong></p>
+      <p>The persistence oracle (median same-DOW same-hour from last 4 weeks - no model) hits 32% median MAPE at 30-min on this window. Broadcasting to 15-min doesn't change that floor. What would unlock it: EV telematics, AC cycle telemetry, per-appliance sub-metering - observability the model currently cannot see.</p>
+      <p>At ToD 4-hour cadence, 23/42 meters clear 5%. At Hourly, 17/42. At 30-min / 15-min DAM, 10/42. The honest framing is: dispatch decisions that care about 4-hour windows are solvable today; real-time block-level forecasting for spike-y residential meters needs new data sources, not a better model.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer>EdgeGrid Forecast Engine - generated from block_accuracy_summary.csv, block_accuracy_cohort.csv, block_accuracy_fleet.csv, forward_forecast_30d.parquet</footer>
+
+<script id="payload" type="application/json">{"fleet":[{"cadence":"dam_15min","label":"15-min DAM","mean_mape":9.907728609118768,"median_mape":3.889705882352933,"clear_count":10,"total_meters":42},{"cadence":"native_30min","label":"30-min Native","mean_mape":9.907728609118768,"median_mape":3.889705882352933,"clear_count":10,"total_meters":42},{"cadence":"hourly","label":"Hourly","mean_mape":7.661174995172741,"median_mape":3.5441595441595464,"clear_count":17,"total_meters":42},{"cadence":"tod_4h","label":"ToD 4-hour","mean_mape":7.399131998177922,"median_mape":3.024355122079375,"clear_count":23,"total_meters":42}],"meters":[{"meter_id":"50143025","cohort":"B","cadence":"dam_15min","mape":14.55,"median_mape":8.845,"p95_ape":50.247,"mbe_kwh":-0.0021,"total_actual_kwh":15.42,"total_predicted_kwh":14.732,"under_5pct":false},{"meter_id":"50143025","cohort":"B","cadence":"hourly","mape":11.473,"median_mape":7.242,"p95_ape":33.79,"mbe_kwh":-0.0077,"total_actual_kwh":15.42,"total_predicted_kwh":14.745,"under_5pct":false},{"meter_id":"50143025","cohort":"B","cadence":"native_30min","mape":14.55,"median_mape":8.845,"p95_ape":50.247,"mbe_kwh":-0.0043,"total_actual_kwh":15.42,"total_predicted_kwh":14.732,"under_5pct":false},{"meter_id":"50143025","cohort":"B","cadence":"tod_4h","mape":7.26,"median_mape":3.9,"p95_ape":22.009,"mbe_kwh":-0.0232,"total_actual_kwh":15.42,"total_predicted_kwh":14.747,"under_5pct":false},{"meter_id":"50154700","cohort":"B","cadence":"dam_15min","mape":6.274,"median_mape":2.807,"p95_ape":12.18,"mbe_kwh":-0.0004,"total_actual_kwh":209.02,"total_predicted_kwh":208.73,"under_5pct":false},{"meter_id":"50154700","cohort":"B","cadence":"hourly","mape":4.045,"median_mape":2.004,"p95_ape":11.515,"mbe_kwh":0.0008,"total_actual_kwh":209.02,"total_predicted_kwh":209.169,"under_5pct":true},{"meter_id":"50154700","cohort":"B","cadence":"native_30min","mape":6.274,"median_mape":2.807,"p95_ape":12.066,"mbe_kwh":-0.0008,"total_actual_kwh":209.02,"total_predicted_kwh":208.73,"under_5pct":false},{"meter_id":"50154700","cohort":"B","cadence":"tod_4h","mape":2.961,"median_mape":1.487,"p95_ape":9.434,"mbe_kwh":0.0032,"total_actual_kwh":209.02,"total_predicted_kwh":209.169,"under_5pct":true},{"meter_id":"50186364","cohort":"D","cadence":"dam_15min","mape":75.76,"median_mape":52.986,"p95_ape":134.799,"mbe_kwh":-0.2303,"total_actual_kwh":220.46,"total_predicted_kwh":104.375,"under_5pct":false},{"meter_id":"50186364","cohort":"D","cadence":"hourly","mape":63.044,"median_mape":51.728,"p95_ape":112.678,"mbe_kwh":-0.9057,"total_actual_kwh":220.46,"total_predicted_kwh":104.533,"under_5pct":false},{"meter_id":"50186364","cohort":"D","cadence":"native_30min","mape":75.76,"median_mape":52.986,"p95_ape":131.529,"mbe_kwh":-0.4607,"total_actual_kwh":220.46,"total_predicted_kwh":104.375,"under_5pct":false},{"meter_id":"50186364","cohort":"D","cadence":"tod_4h","mape":101.549,"median_mape":51.968,"p95_ape":131.786,"mbe_kwh":-3.0982,"total_actual_kwh":220.46,"total_predicted_kwh":105.828,"under_5pct":false},{"meter_id":"51057607","cohort":"B","cadence":"dam_15min","mape":9.916,"median_mape":8.212,"p95_ape":22.847,"mbe_kwh":-0.0084,"total_actual_kwh":148.282,"total_predicted_kwh":142.682,"under_5pct":false},{"meter_id":"51057607","cohort":"B","cadence":"hourly","mape":8.611,"median_mape":8.073,"p95_ape":15.338,"mbe_kwh":-0.0325,"total_actual_kwh":148.282,"total_predicted_kwh":142.784,"under_5pct":false},{"meter_id":"51057607","cohort":"B","cadence":"native_30min","mape":9.916,"median_mape":8.212,"p95_ape":22.839,"mbe_kwh":-0.0168,"total_actual_kwh":148.282,"total_predicted_kwh":142.682,"under_5pct":false},{"meter_id":"51057607","cohort":"B","cadence":"tod_4h","mape":9.839,"median_mape":5.02,"p95_ape":24.1,"mbe_kwh":-0.1206,"total_actual_kwh":148.282,"total_predicted_kwh":142.975,"under_5pct":false},{"meter_id":"53401842","cohort":"C","cadence":"dam_15min","mape":14.798,"median_mape":3.959,"p95_ape":53.408,"mbe_kwh":0.0245,"total_actual_kwh":305.817,"total_predicted_kwh":323.297,"under_5pct":false},{"meter_id":"53401842","cohort":"C","cadence":"hourly","mape":11.21,"median_mape":3.85,"p95_ape":47.146,"mbe_kwh":0.0977,"total_actual_kwh":305.817,"total_predicted_kwh":323.297,"under_5pct":false},{"meter_id":"53401842","cohort":"C","cadence":"native_30min","mape":14.798,"median_mape":3.959,"p95_ape":53.353,"mbe_kwh":0.049,"total_actual_kwh":305.817,"total_predicted_kwh":323.297,"under_5pct":false},{"meter_id":"53401842","cohort":"C","cadence":"tod_4h","mape":5.987,"median_mape":3.433,"p95_ape":15.568,"mbe_kwh":0.3884,"total_actual_kwh":305.817,"total_predicted_kwh":323.297,"under_5pct":false},{"meter_id":"53401885","cohort":"B","cadence":"dam_15min","mape":8.867,"median_mape":4.438,"p95_ape":29.351,"mbe_kwh":0.0055,"total_actual_kwh":199.198,"total_predicted_kwh":203.056,"under_5pct":false},{"meter_id":"53401885","cohort":"B","cadence":"hourly","mape":9.257,"median_mape":4.219,"p95_ape":19.585,"mbe_kwh":0.022,"total_actual_kwh":199.198,"total_predicted_kwh":203.111,"under_5pct":false},{"meter_id":"53401885","cohort":"B","cadence":"native_30min","mape":8.867,"median_mape":4.438,"p95_ape":28.989,"mbe_kwh":0.0109,"total_actual_kwh":199.198,"total_predicted_kwh":203.056,"under_5pct":false},{"meter_id":"53401885","cohort":"B","cadence":"tod_4h","mape":4.504,"median_mape":4.155,"p95_ape":11.912,"mbe_kwh":0.0909,"total_actual_kwh":199.198,"total_predicted_kwh":203.287,"under_5pct":true},{"meter_id":"53403416","cohort":"B","cadence":"dam_15min","mape":13.317,"median_mape":3.287,"p95_ape":59.278,"mbe_kwh":0.0173,"total_actual_kwh":206.566,"total_predicted_kwh":218.873,"under_5pct":false},{"meter_id":"53403416","cohort":"B","cadence":"hourly","mape":9.969,"median_mape":3.344,"p95_ape":48.128,"mbe_kwh":0.0715,"total_actual_kwh":206.566,"total_predicted_kwh":219.36,"under_5pct":false},{"meter_id":"53403416","cohort":"B","cadence":"native_30min","mape":13.317,"median_mape":3.287,"p95_ape":59.25,"mbe_kwh":0.0346,"total_actual_kwh":206.566,"total_predicted_kwh":218.873,"under_5pct":false},{"meter_id":"53403416","cohort":"B","cadence":"tod_4h","mape":5.977,"median_mape":3.069,"p95_ape":20.663,"mbe_kwh":0.291,"total_actual_kwh":206.566,"total_predicted_kwh":219.66,"under_5pct":false},{"meter_id":"53407938","cohort":"A","cadence":"dam_15min","mape":2.626,"median_mape":1.291,"p95_ape":8.945,"mbe_kwh":0.0036,"total_actual_kwh":262.097,"total_predicted_kwh":264.304,"under_5pct":true},{"meter_id":"53407938","cohort":"A","cadence":"hourly","mape":2.081,"median_mape":1.079,"p95_ape":6.185,"mbe_kwh":0.0142,"total_actual_kwh":262.097,"total_predicted_kwh":264.304,"under_5pct":true},{"meter_id":"53407938","cohort":"A","cadence":"native_30min","mape":2.626,"median_mape":1.291,"p95_ape":8.933,"mbe_kwh":0.0071,"total_actual_kwh":262.097,"total_predicted_kwh":264.304,"under_5pct":true},{"meter_id":"53407938","cohort":"A","cadence":"tod_4h","mape":2.018,"median_mape":0.753,"p95_ape":5.566,"mbe_kwh":0.0566,"total_actual_kwh":262.097,"total_predicted_kwh":264.304,"under_5pct":true},{"meter_id":"53408407","cohort":"A","cadence":"dam_15min","mape":4.811,"median_mape":1.949,"p95_ape":18.411,"mbe_kwh":-0.0017,"total_actual_kwh":369.435,"total_predicted_kwh":368.239,"under_5pct":true},{"meter_id":"53408407","cohort":"A","cadence":"hourly","mape":3.586,"median_mape":1.677,"p95_ape":13.401,"mbe_kwh":-0.0066,"total_actual_kwh":369.435,"total_predicted_kwh":368.239,"under_5pct":true},{"meter_id":"53408407","cohort":"A","cadence":"native_30min","mape":4.811,"median_mape":1.949,"p95_ape":18.368,"mbe_kwh":-0.0033,"total_actual_kwh":369.435,"total_predicted_kwh":368.239,"under_5pct":true},{"meter_id":"53408407","cohort":"A","cadence":"tod_4h","mape":2.871,"median_mape":1.372,"p95_ape":9.574,"mbe_kwh":-0.0266,"total_actual_kwh":369.435,"total_predicted_kwh":368.239,"under_5pct":true},{"meter_id":"53408951","cohort":"B","cadence":"dam_15min","mape":8.264,"median_mape":3.708,"p95_ape":27.191,"mbe_kwh":-0.0034,"total_actual_kwh":264.546,"total_predicted_kwh":262.11,"under_5pct":false},{"meter_id":"53408951","cohort":"B","cadence":"hourly","mape":6.011,"median_mape":3.035,"p95_ape":18.651,"mbe_kwh":-0.0135,"total_actual_kwh":264.546,"total_predicted_kwh":262.11,"under_5pct":false},{"meter_id":"53408951","cohort":"B","cadence":"native_30min","mape":8.264,"median_mape":3.708,"p95_ape":27.191,"mbe_kwh":-0.0068,"total_actual_kwh":264.546,"total_predicted_kwh":262.11,"under_5pct":false},{"meter_id":"53408951","cohort":"B","cadence":"tod_4h","mape":3.563,"median_mape":1.613,"p95_ape":12.487,"mbe_kwh":-0.0541,"total_actual_kwh":264.546,"total_predicted_kwh":262.11,"under_5pct":true},{"meter_id":"65000228","cohort":"B","cadence":"dam_15min","mape":8.409,"median_mape":2.798,"p95_ape":32.501,"mbe_kwh":-0.0005,"total_actual_kwh":187.579,"total_predicted_kwh":187.199,"under_5pct":false},{"meter_id":"65000228","cohort":"B","cadence":"hourly","mape":7.041,"median_mape":3.305,"p95_ape":25.746,"mbe_kwh":-0.0021,"total_actual_kwh":187.579,"total_predicted_kwh":187.199,"under_5pct":false},{"meter_id":"65000228","cohort":"B","cadence":"native_30min","mape":8.409,"median_mape":2.798,"p95_ape":32.481,"mbe_kwh":-0.0011,"total_actual_kwh":187.579,"total_predicted_kwh":187.199,"under_5pct":false},{"meter_id":"65000228","cohort":"B","cadence":"tod_4h","mape":3.695,"median_mape":2.837,"p95_ape":10.015,"mbe_kwh":-0.0084,"total_actual_kwh":187.579,"total_predicted_kwh":187.199,"under_5pct":true},{"meter_id":"65001891","cohort":"B","cadence":"dam_15min","mape":3.352,"median_mape":1.327,"p95_ape":10.591,"mbe_kwh":0.0023,"total_actual_kwh":222.384,"total_predicted_kwh":224.035,"under_5pct":true},{"meter_id":"65001891","cohort":"B","cadence":"hourly","mape":2.707,"median_mape":1.156,"p95_ape":10.09,"mbe_kwh":0.0092,"total_actual_kwh":222.384,"total_predicted_kwh":224.035,"under_5pct":true},{"meter_id":"65001891","cohort":"B","cadence":"native_30min","mape":3.352,"median_mape":1.327,"p95_ape":10.591,"mbe_kwh":0.0046,"total_actual_kwh":222.384,"total_predicted_kwh":224.035,"under_5pct":true},{"meter_id":"65001891","cohort":"B","cadence":"tod_4h","mape":2.873,"median_mape":0.909,"p95_ape":11.094,"mbe_kwh":0.0367,"total_actual_kwh":222.384,"total_predicted_kwh":224.035,"under_5pct":true},{"meter_id":"65002231","cohort":"A","cadence":"dam_15min","mape":4.349,"median_mape":2.765,"p95_ape":13.512,"mbe_kwh":-0.0132,"total_actual_kwh":303.514,"total_predicted_kwh":294.002,"under_5pct":true},{"meter_id":"65002231","cohort":"A","cadence":"hourly","mape":3.555,"median_mape":2.294,"p95_ape":9.746,"mbe_kwh":-0.0528,"total_actual_kwh":303.514,"total_predicted_kwh":294.002,"under_5pct":true},{"meter_id":"65002231","cohort":"A","cadence":"native_30min","mape":4.349,"median_mape":2.765,"p95_ape":13.512,"mbe_kwh":-0.0264,"total_actual_kwh":303.514,"total_predicted_kwh":294.002,"under_5pct":true},{"meter_id":"65002231","cohort":"A","cadence":"tod_4h","mape":3.816,"median_mape":2.905,"p95_ape":13.158,"mbe_kwh":-0.2114,"total_actual_kwh":303.514,"total_predicted_kwh":294.002,"under_5pct":true},{"meter_id":"65003102","cohort":"B","cadence":"dam_15min","mape":5.606,"median_mape":3.763,"p95_ape":14.97,"mbe_kwh":-0.0039,"total_actual_kwh":129.48,"total_predicted_kwh":126.693,"under_5pct":false},{"meter_id":"65003102","cohort":"B","cadence":"hourly","mape":4.924,"median_mape":3.638,"p95_ape":13.447,"mbe_kwh":-0.0155,"total_actual_kwh":129.48,"total_predicted_kwh":126.693,"under_5pct":true},{"meter_id":"65003102","cohort":"B","cadence":"native_30min","mape":5.606,"median_mape":3.763,"p95_ape":14.967,"mbe_kwh":-0.0078,"total_actual_kwh":129.48,"total_predicted_kwh":126.693,"under_5pct":false},{"meter_id":"65003102","cohort":"B","cadence":"tod_4h","mape":4.052,"median_mape":3.57,"p95_ape":8.985,"mbe_kwh":-0.0619,"total_actual_kwh":129.48,"total_predicted_kwh":126.693,"under_5pct":true},{"meter_id":"65003175","cohort":"B","cadence":"dam_15min","mape":7.126,"median_mape":5.639,"p95_ape":20.101,"mbe_kwh":-0.0213,"total_actual_kwh":296.043,"total_predicted_kwh":280.754,"under_5pct":false},{"meter_id":"65003175","cohort":"B","cadence":"hourly","mape":6.547,"median_mape":4.815,"p95_ape":17.499,"mbe_kwh":-0.0849,"total_actual_kwh":296.043,"total_predicted_kwh":280.754,"under_5pct":false},{"meter_id":"65003175","cohort":"B","cadence":"native_30min","mape":7.126,"median_mape":5.639,"p95_ape":20.092,"mbe_kwh":-0.0426,"total_actual_kwh":296.043,"total_predicted_kwh":280.754,"under_5pct":false},{"meter_id":"65003175","cohort":"B","cadence":"tod_4h","mape":6.441,"median_mape":4.629,"p95_ape":17.637,"mbe_kwh":-0.3398,"total_actual_kwh":296.043,"total_predicted_kwh":280.754,"under_5pct":false},{"meter_id":"65004669","cohort":"B","cadence":"dam_15min","mape":6.76,"median_mape":2.186,"p95_ape":17.901,"mbe_kwh":-0.0154,"total_actual_kwh":238.512,"total_predicted_kwh":227.521,"under_5pct":false},{"meter_id":"65004669","cohort":"B","cadence":"hourly","mape":5.247,"median_mape":2.056,"p95_ape":16.428,"mbe_kwh":-0.0617,"total_actual_kwh":238.512,"total_predicted_kwh":227.521,"under_5pct":false},{"meter_id":"65004669","cohort":"B","cadence":"native_30min","mape":6.76,"median_mape":2.186,"p95_ape":17.897,"mbe_kwh":-0.0309,"total_actual_kwh":238.512,"total_predicted_kwh":227.521,"under_5pct":false},{"meter_id":"65004669","cohort":"B","cadence":"tod_4h","mape":5.495,"median_mape":3.596,"p95_ape":16.401,"mbe_kwh":-0.2401,"total_actual_kwh":238.512,"total_predicted_kwh":227.709,"under_5pct":false},{"meter_id":"65007036","cohort":"B","cadence":"dam_15min","mape":6.093,"median_mape":5.357,"p95_ape":13.662,"mbe_kwh":-0.0066,"total_actual_kwh":487.5,"total_predicted_kwh":482.752,"under_5pct":false},{"meter_id":"65007036","cohort":"B","cadence":"hourly","mape":4.864,"median_mape":4.899,"p95_ape":11.744,"mbe_kwh":-0.0264,"total_actual_kwh":487.5,"total_predicted_kwh":482.752,"under_5pct":true},{"meter_id":"65007036","cohort":"B","cadence":"native_30min","mape":6.093,"median_mape":5.357,"p95_ape":13.662,"mbe_kwh":-0.0132,"total_actual_kwh":487.5,"total_predicted_kwh":482.752,"under_5pct":false},{"meter_id":"65007036","cohort":"B","cadence":"tod_4h","mape":3.633,"median_mape":1.992,"p95_ape":10.264,"mbe_kwh":-0.1055,"total_actual_kwh":487.5,"total_predicted_kwh":482.752,"under_5pct":true},{"meter_id":"65011155","cohort":"A","cadence":"dam_15min","mape":4.653,"median_mape":3.712,"p95_ape":12.428,"mbe_kwh":-0.0195,"total_actual_kwh":442.87,"total_predicted_kwh":428.796,"under_5pct":true},{"meter_id":"65011155","cohort":"A","cadence":"hourly","mape":4.038,"median_mape":3.118,"p95_ape":10.085,"mbe_kwh":-0.0782,"total_actual_kwh":442.87,"total_predicted_kwh":428.796,"under_5pct":true},{"meter_id":"65011155","cohort":"A","cadence":"native_30min","mape":4.653,"median_mape":3.712,"p95_ape":12.428,"mbe_kwh":-0.0391,"total_actual_kwh":442.87,"total_predicted_kwh":428.796,"under_5pct":true},{"meter_id":"65011155","cohort":"A","cadence":"tod_4h","mape":3.34,"median_mape":2.998,"p95_ape":6.624,"mbe_kwh":-0.3128,"total_actual_kwh":442.87,"total_predicted_kwh":428.796,"under_5pct":true},{"meter_id":"65012662","cohort":"B","cadence":"dam_15min","mape":5.357,"median_mape":3.961,"p95_ape":14.243,"mbe_kwh":-0.0085,"total_actual_kwh":141.31,"total_predicted_kwh":135.19,"under_5pct":false},{"meter_id":"65012662","cohort":"B","cadence":"hourly","mape":4.698,"median_mape":3.944,"p95_ape":14.148,"mbe_kwh":-0.034,"total_actual_kwh":141.31,"total_predicted_kwh":135.19,"under_5pct":true},{"meter_id":"65012662","cohort":"B","cadence":"native_30min","mape":5.357,"median_mape":3.961,"p95_ape":14.243,"mbe_kwh":-0.017,"total_actual_kwh":141.31,"total_predicted_kwh":135.19,"under_5pct":false},{"meter_id":"65012662","cohort":"B","cadence":"tod_4h","mape":4.55,"median_mape":3.959,"p95_ape":8.741,"mbe_kwh":-0.136,"total_actual_kwh":141.31,"total_predicted_kwh":135.19,"under_5pct":true},{"meter_id":"65015026","cohort":"B","cadence":"dam_15min","mape":7.834,"median_mape":6.944,"p95_ape":18.866,"mbe_kwh":-0.0102,"total_actual_kwh":189.978,"total_predicted_kwh":182.677,"under_5pct":false},{"meter_id":"65015026","cohort":"B","cadence":"hourly","mape":6.852,"median_mape":6.819,"p95_ape":14.345,"mbe_kwh":-0.0406,"total_actual_kwh":189.978,"total_predicted_kwh":182.677,"under_5pct":false},{"meter_id":"65015026","cohort":"B","cadence":"native_30min","mape":7.834,"median_mape":6.944,"p95_ape":18.788,"mbe_kwh":-0.0203,"total_actual_kwh":189.978,"total_predicted_kwh":182.677,"under_5pct":false},{"meter_id":"65015026","cohort":"B","cadence":"tod_4h","mape":6.144,"median_mape":5.124,"p95_ape":13.327,"mbe_kwh":-0.1623,"total_actual_kwh":189.978,"total_predicted_kwh":182.677,"under_5pct":false},{"meter_id":"65015739","cohort":"A","cadence":"dam_15min","mape":2.825,"median_mape":1.982,"p95_ape":8.537,"mbe_kwh":0.0002,"total_actual_kwh":144.426,"total_predicted_kwh":144.586,"under_5pct":true},{"meter_id":"65015739","cohort":"A","cadence":"hourly","mape":2.395,"median_mape":2.085,"p95_ape":5.866,"mbe_kwh":0.0009,"total_actual_kwh":144.426,"total_predicted_kwh":144.586,"under_5pct":true},{"meter_id":"65015739","cohort":"A","cadence":"native_30min","mape":2.825,"median_mape":1.982,"p95_ape":8.517,"mbe_kwh":0.0004,"total_actual_kwh":144.426,"total_predicted_kwh":144.586,"under_5pct":true},{"meter_id":"65015739","cohort":"A","cadence":"tod_4h","mape":1.905,"median_mape":1.472,"p95_ape":4.805,"mbe_kwh":0.0035,"total_actual_kwh":144.426,"total_predicted_kwh":144.586,"under_5pct":true},{"meter_id":"65017058","cohort":"B","cadence":"dam_15min","mape":6.567,"median_mape":5.03,"p95_ape":15.382,"mbe_kwh":-0.0187,"total_actual_kwh":349.025,"total_predicted_kwh":335.541,"under_5pct":false},{"meter_id":"65017058","cohort":"B","cadence":"hourly","mape":5.307,"median_mape":4.666,"p95_ape":13.63,"mbe_kwh":-0.0749,"total_actual_kwh":349.025,"total_predicted_kwh":335.541,"under_5pct":false},{"meter_id":"65017058","cohort":"B","cadence":"native_30min","mape":6.567,"median_mape":5.03,"p95_ape":15.382,"mbe_kwh":-0.0375,"total_actual_kwh":349.025,"total_predicted_kwh":335.541,"under_5pct":false},{"meter_id":"65017058","cohort":"B","cadence":"tod_4h","mape":4.804,"median_mape":3.919,"p95_ape":12.133,"mbe_kwh":-0.2996,"total_actual_kwh":349.025,"total_predicted_kwh":335.541,"under_5pct":true},{"meter_id":"65021124","cohort":"C","cadence":"dam_15min","mape":21.913,"median_mape":6.156,"p95_ape":50.156,"mbe_kwh":-0.0189,"total_actual_kwh":316.159,"total_predicted_kwh":304.164,"under_5pct":false},{"meter_id":"65021124","cohort":"C","cadence":"hourly","mape":10.109,"median_mape":5.285,"p95_ape":33.9,"mbe_kwh":-0.074,"total_actual_kwh":316.159,"total_predicted_kwh":304.242,"under_5pct":false},{"meter_id":"65021124","cohort":"C","cadence":"native_30min","mape":21.913,"median_mape":6.156,"p95_ape":50.089,"mbe_kwh":-0.0378,"total_actual_kwh":316.159,"total_predicted_kwh":304.164,"under_5pct":false},{"meter_id":"65021124","cohort":"C","cadence":"tod_4h","mape":6.215,"median_mape":3.601,"p95_ape":21.902,"mbe_kwh":-0.2762,"total_actual_kwh":316.159,"total_predicted_kwh":304.282,"under_5pct":false},{"meter_id":"65021169","cohort":"C","cadence":"dam_15min","mape":24.75,"median_mape":17.41,"p95_ape":73.521,"mbe_kwh":0.0357,"total_actual_kwh":177.02,"total_predicted_kwh":184.73,"under_5pct":false},{"meter_id":"65021169","cohort":"C","cadence":"hourly","mape":21.377,"median_mape":12.637,"p95_ape":70.177,"mbe_kwh":0.1211,"total_actual_kwh":177.02,"total_predicted_kwh":184.774,"under_5pct":false},{"meter_id":"65021169","cohort":"C","cadence":"native_30min","mape":24.75,"median_mape":17.41,"p95_ape":72.752,"mbe_kwh":0.0714,"total_actual_kwh":177.02,"total_predicted_kwh":184.73,"under_5pct":false},{"meter_id":"65021169","cohort":"C","cadence":"tod_4h","mape":20.456,"median_mape":9.973,"p95_ape":68.937,"mbe_kwh":0.236,"total_actual_kwh":177.02,"total_predicted_kwh":184.808,"under_5pct":false},{"meter_id":"65021964","cohort":"A","cadence":"dam_15min","mape":4.176,"median_mape":3.655,"p95_ape":11.396,"mbe_kwh":-0.005,"total_actual_kwh":191.13,"total_predicted_kwh":187.564,"under_5pct":true},{"meter_id":"65021964","cohort":"A","cadence":"hourly","mape":3.746,"median_mape":3.185,"p95_ape":9.066,"mbe_kwh":-0.019,"total_actual_kwh":191.13,"total_predicted_kwh":187.752,"under_5pct":true},{"meter_id":"65021964","cohort":"A","cadence":"native_30min","mape":4.176,"median_mape":3.655,"p95_ape":11.377,"mbe_kwh":-0.0101,"total_actual_kwh":191.13,"total_predicted_kwh":187.564,"under_5pct":true},{"meter_id":"65021964","cohort":"A","cadence":"tod_4h","mape":3.192,"median_mape":2.359,"p95_ape":8.833,"mbe_kwh":-0.0751,"total_actual_kwh":191.13,"total_predicted_kwh":187.752,"under_5pct":true},{"meter_id":"65022302","cohort":"B","cadence":"dam_15min","mape":15.208,"median_mape":8.901,"p95_ape":41.883,"mbe_kwh":-0.0045,"total_actual_kwh":225.768,"total_predicted_kwh":222.509,"under_5pct":false},{"meter_id":"65022302","cohort":"B","cadence":"hourly","mape":10.707,"median_mape":5.536,"p95_ape":35.179,"mbe_kwh":-0.0181,"total_actual_kwh":225.768,"total_predicted_kwh":222.509,"under_5pct":false},{"meter_id":"65022302","cohort":"B","cadence":"native_30min","mape":15.208,"median_mape":8.901,"p95_ape":41.883,"mbe_kwh":-0.0091,"total_actual_kwh":225.768,"total_predicted_kwh":222.509,"under_5pct":false},{"meter_id":"65022302","cohort":"B","cadence":"tod_4h","mape":8.734,"median_mape":3.638,"p95_ape":25.152,"mbe_kwh":-0.0724,"total_actual_kwh":225.768,"total_predicted_kwh":222.509,"under_5pct":false},{"meter_id":"65022501","cohort":"A","cadence":"dam_15min","mape":8.91,"median_mape":3.7,"p95_ape":42.166,"mbe_kwh":-0.023,"total_actual_kwh":288.931,"total_predicted_kwh":272.448,"under_5pct":false},{"meter_id":"65022501","cohort":"A","cadence":"hourly","mape":8.188,"median_mape":3.181,"p95_ape":42.385,"mbe_kwh":-0.0916,"total_actual_kwh":288.931,"total_predicted_kwh":272.448,"under_5pct":false},{"meter_id":"65022501","cohort":"A","cadence":"native_30min","mape":8.91,"median_mape":3.7,"p95_ape":42.144,"mbe_kwh":-0.0459,"total_actual_kwh":288.931,"total_predicted_kwh":272.448,"under_5pct":false},{"meter_id":"65022501","cohort":"A","cadence":"tod_4h","mape":8.17,"median_mape":3.344,"p95_ape":36.153,"mbe_kwh":-0.3663,"total_actual_kwh":288.931,"total_predicted_kwh":272.448,"under_5pct":false},{"meter_id":"65023781","cohort":"B","cadence":"dam_15min","mape":4.999,"median_mape":3.398,"p95_ape":11.814,"mbe_kwh":-0.0074,"total_actual_kwh":265.781,"total_predicted_kwh":260.46,"under_5pct":true},{"meter_id":"65023781","cohort":"B","cadence":"hourly","mape":4.504,"median_mape":3.171,"p95_ape":9.347,"mbe_kwh":-0.0286,"total_actual_kwh":265.781,"total_predicted_kwh":260.625,"under_5pct":true},{"meter_id":"65023781","cohort":"B","cadence":"native_30min","mape":4.999,"median_mape":3.398,"p95_ape":11.783,"mbe_kwh":-0.0149,"total_actual_kwh":265.781,"total_predicted_kwh":260.46,"under_5pct":true},{"meter_id":"65023781","cohort":"B","cadence":"tod_4h","mape":3.913,"median_mape":2.741,"p95_ape":12.423,"mbe_kwh":-0.1146,"total_actual_kwh":265.781,"total_predicted_kwh":260.625,"under_5pct":true},{"meter_id":"65023784","cohort":"B","cadence":"dam_15min","mape":8.685,"median_mape":6.156,"p95_ape":24.957,"mbe_kwh":-0.0033,"total_actual_kwh":243.598,"total_predicted_kwh":241.216,"under_5pct":false},{"meter_id":"65023784","cohort":"B","cadence":"hourly","mape":7.346,"median_mape":4.795,"p95_ape":19.649,"mbe_kwh":-0.0126,"total_actual_kwh":243.598,"total_predicted_kwh":241.33,"under_5pct":false},{"meter_id":"65023784","cohort":"B","cadence":"native_30min","mape":8.685,"median_mape":6.156,"p95_ape":24.932,"mbe_kwh":-0.0067,"total_actual_kwh":243.598,"total_predicted_kwh":241.216,"under_5pct":false},{"meter_id":"65023784","cohort":"B","cadence":"tod_4h","mape":6.308,"median_mape":4.34,"p95_ape":19.479,"mbe_kwh":-0.0504,"total_actual_kwh":243.598,"total_predicted_kwh":241.33,"under_5pct":false},{"meter_id":"65024185","cohort":"B","cadence":"dam_15min","mape":5.988,"median_mape":3.002,"p95_ape":21.212,"mbe_kwh":0.0069,"total_actual_kwh":195.647,"total_predicted_kwh":200.62,"under_5pct":false},{"meter_id":"65024185","cohort":"B","cadence":"hourly","mape":5.081,"median_mape":3.527,"p95_ape":17.573,"mbe_kwh":0.0276,"total_actual_kwh":195.647,"total_predicted_kwh":200.62,"under_5pct":false},{"meter_id":"65024185","cohort":"B","cadence":"native_30min","mape":5.988,"median_mape":3.002,"p95_ape":21.212,"mbe_kwh":0.0138,"total_actual_kwh":195.647,"total_predicted_kwh":200.62,"under_5pct":false},{"meter_id":"65024185","cohort":"B","cadence":"tod_4h","mape":4.479,"median_mape":2.832,"p95_ape":10.703,"mbe_kwh":0.1105,"total_actual_kwh":195.647,"total_predicted_kwh":200.62,"under_5pct":true},{"meter_id":"65024487","cohort":"B","cadence":"dam_15min","mape":8.795,"median_mape":6.106,"p95_ape":24.492,"mbe_kwh":0.0095,"total_actual_kwh":129.357,"total_predicted_kwh":136.211,"under_5pct":false},{"meter_id":"65024487","cohort":"B","cadence":"hourly","mape":7.361,"median_mape":5.85,"p95_ape":18.02,"mbe_kwh":0.0381,"total_actual_kwh":129.357,"total_predicted_kwh":136.211,"under_5pct":false},{"meter_id":"65024487","cohort":"B","cadence":"native_30min","mape":8.795,"median_mape":6.106,"p95_ape":24.488,"mbe_kwh":0.0191,"total_actual_kwh":129.357,"total_predicted_kwh":136.211,"under_5pct":false},{"meter_id":"65024487","cohort":"B","cadence":"tod_4h","mape":6.109,"median_mape":5.318,"p95_ape":12.364,"mbe_kwh":0.1523,"total_actual_kwh":129.357,"total_predicted_kwh":136.211,"under_5pct":false},{"meter_id":"65025443","cohort":"B","cadence":"dam_15min","mape":5.643,"median_mape":2.861,"p95_ape":20.327,"mbe_kwh":0.0075,"total_actual_kwh":306.533,"total_predicted_kwh":311.942,"under_5pct":false},{"meter_id":"65025443","cohort":"B","cadence":"hourly","mape":4.173,"median_mape":2.367,"p95_ape":13.255,"mbe_kwh":0.03,"total_actual_kwh":306.533,"total_predicted_kwh":311.942,"under_5pct":true},{"meter_id":"65025443","cohort":"B","cadence":"native_30min","mape":5.643,"median_mape":2.861,"p95_ape":20.327,"mbe_kwh":0.015,"total_actual_kwh":306.533,"total_predicted_kwh":311.942,"under_5pct":false},{"meter_id":"65025443","cohort":"B","cadence":"tod_4h","mape":2.962,"median_mape":2.007,"p95_ape":8.208,"mbe_kwh":0.1202,"total_actual_kwh":306.533,"total_predicted_kwh":311.942,"under_5pct":true},{"meter_id":"65030697","cohort":"B","cadence":"dam_15min","mape":8.517,"median_mape":5.911,"p95_ape":28.053,"mbe_kwh":-0.0008,"total_actual_kwh":125.515,"total_predicted_kwh":124.948,"under_5pct":false},{"meter_id":"65030697","cohort":"B","cadence":"hourly","mape":7.378,"median_mape":5.3,"p95_ape":25.849,"mbe_kwh":-0.0032,"total_actual_kwh":125.515,"total_predicted_kwh":124.948,"under_5pct":false},{"meter_id":"65030697","cohort":"B","cadence":"native_30min","mape":8.517,"median_mape":5.911,"p95_ape":27.895,"mbe_kwh":-0.0016,"total_actual_kwh":125.515,"total_predicted_kwh":124.948,"under_5pct":false},{"meter_id":"65030697","cohort":"B","cadence":"tod_4h","mape":7.084,"median_mape":5.176,"p95_ape":16.18,"mbe_kwh":-0.01,"total_actual_kwh":125.515,"total_predicted_kwh":125.065,"under_5pct":false},{"meter_id":"65041990","cohort":"B","cadence":"dam_15min","mape":32.816,"median_mape":6.689,"p95_ape":41.235,"mbe_kwh":-0.0154,"total_actual_kwh":167.825,"total_predicted_kwh":158.32,"under_5pct":false},{"meter_id":"65041990","cohort":"B","cadence":"hourly","mape":12.508,"median_mape":4.563,"p95_ape":28.397,"mbe_kwh":-0.0592,"total_actual_kwh":167.825,"total_predicted_kwh":158.416,"under_5pct":false},{"meter_id":"65041990","cohort":"B","cadence":"native_30min","mape":32.816,"median_mape":6.689,"p95_ape":40.079,"mbe_kwh":-0.0309,"total_actual_kwh":167.825,"total_predicted_kwh":158.32,"under_5pct":false},{"meter_id":"65041990","cohort":"B","cadence":"tod_4h","mape":9.388,"median_mape":5.702,"p95_ape":40.221,"mbe_kwh":-0.2159,"total_actual_kwh":167.825,"total_predicted_kwh":158.543,"under_5pct":false},{"meter_id":"65044028","cohort":"B","cadence":"dam_15min","mape":7.288,"median_mape":4.365,"p95_ape":19.761,"mbe_kwh":-0.004,"total_actual_kwh":383.739,"total_predicted_kwh":380.878,"under_5pct":false},{"meter_id":"65044028","cohort":"B","cadence":"hourly","mape":6.002,"median_mape":3.995,"p95_ape":16.854,"mbe_kwh":-0.0159,"total_actual_kwh":383.739,"total_predicted_kwh":380.878,"under_5pct":false},{"meter_id":"65044028","cohort":"B","cadence":"native_30min","mape":7.288,"median_mape":4.365,"p95_ape":19.693,"mbe_kwh":-0.008,"total_actual_kwh":383.739,"total_predicted_kwh":380.878,"under_5pct":false},{"meter_id":"65044028","cohort":"B","cadence":"tod_4h","mape":3.682,"median_mape":2.238,"p95_ape":9.714,"mbe_kwh":-0.0636,"total_actual_kwh":383.739,"total_predicted_kwh":380.878,"under_5pct":true},{"meter_id":"65045250","cohort":"A","cadence":"dam_15min","mape":2.82,"median_mape":1.473,"p95_ape":8.65,"mbe_kwh":0.0026,"total_actual_kwh":206.408,"total_predicted_kwh":208.287,"under_5pct":true},{"meter_id":"65045250","cohort":"A","cadence":"hourly","mape":2.542,"median_mape":1.384,"p95_ape":6.378,"mbe_kwh":0.0104,"total_actual_kwh":206.408,"total_predicted_kwh":208.287,"under_5pct":true},{"meter_id":"65045250","cohort":"A","cadence":"native_30min","mape":2.82,"median_mape":1.473,"p95_ape":8.65,"mbe_kwh":0.0052,"total_actual_kwh":206.408,"total_predicted_kwh":208.287,"under_5pct":true},{"meter_id":"65045250","cohort":"A","cadence":"tod_4h","mape":2.217,"median_mape":1.254,"p95_ape":6.113,"mbe_kwh":0.0417,"total_actual_kwh":206.408,"total_predicted_kwh":208.287,"under_5pct":true},{"meter_id":"65049719","cohort":"C","cadence":"dam_15min","mape":20.381,"median_mape":14.973,"p95_ape":51.564,"mbe_kwh":0.0284,"total_actual_kwh":331.735,"total_predicted_kwh":352.107,"under_5pct":false},{"meter_id":"65049719","cohort":"C","cadence":"hourly","mape":18.484,"median_mape":12.247,"p95_ape":49.753,"mbe_kwh":0.1132,"total_actual_kwh":331.735,"total_predicted_kwh":352.107,"under_5pct":false},{"meter_id":"65049719","cohort":"C","cadence":"native_30min","mape":20.381,"median_mape":14.973,"p95_ape":51.537,"mbe_kwh":0.0567,"total_actual_kwh":331.735,"total_predicted_kwh":352.107,"under_5pct":false},{"meter_id":"65049719","cohort":"C","cadence":"tod_4h","mape":15.812,"median_mape":8.952,"p95_ape":43.408,"mbe_kwh":0.4527,"total_actual_kwh":331.735,"total_predicted_kwh":352.107,"under_5pct":false},{"meter_id":"67001151","cohort":"B","cadence":"dam_15min","mape":8.869,"median_mape":4.061,"p95_ape":29.305,"mbe_kwh":-0.0231,"total_actual_kwh":3404.198,"total_predicted_kwh":3387.588,"under_5pct":false},{"meter_id":"67001151","cohort":"B","cadence":"hourly","mape":8.441,"median_mape":2.943,"p95_ape":28.936,"mbe_kwh":-0.0923,"total_actual_kwh":3404.198,"total_predicted_kwh":3387.588,"under_5pct":false},{"meter_id":"67001151","cohort":"B","cadence":"native_30min","mape":8.869,"median_mape":4.061,"p95_ape":29.299,"mbe_kwh":-0.0463,"total_actual_kwh":3404.198,"total_predicted_kwh":3387.588,"under_5pct":false},{"meter_id":"67001151","cohort":"B","cadence":"tod_4h","mape":6.004,"median_mape":1.254,"p95_ape":25.124,"mbe_kwh":-0.3691,"total_actual_kwh":3404.198,"total_predicted_kwh":3387.588,"under_5pct":false},{"meter_id":"67001818","cohort":"B","cadence":"dam_15min","mape":4.654,"median_mape":2.151,"p95_ape":17.177,"mbe_kwh":0.0038,"total_actual_kwh":2485.778,"total_predicted_kwh":2488.499,"under_5pct":true},{"meter_id":"67001818","cohort":"B","cadence":"hourly","mape":3.652,"median_mape":2.178,"p95_ape":10.324,"mbe_kwh":0.0151,"total_actual_kwh":2485.778,"total_predicted_kwh":2488.499,"under_5pct":true},{"meter_id":"67001818","cohort":"B","cadence":"native_30min","mape":4.654,"median_mape":2.151,"p95_ape":17.177,"mbe_kwh":0.0076,"total_actual_kwh":2485.778,"total_predicted_kwh":2488.499,"under_5pct":true},{"meter_id":"67001818","cohort":"B","cadence":"tod_4h","mape":4.04,"median_mape":2.056,"p95_ape":17.439,"mbe_kwh":0.0605,"total_actual_kwh":2485.778,"total_predicted_kwh":2488.499,"under_5pct":true},{"meter_id":"67003234","cohort":"B","cadence":"dam_15min","mape":11.035,"median_mape":5.27,"p95_ape":33.796,"mbe_kwh":-0.0205,"total_actual_kwh":3575.072,"total_predicted_kwh":3560.332,"under_5pct":false},{"meter_id":"67003234","cohort":"B","cadence":"hourly","mape":10.099,"median_mape":5.317,"p95_ape":31.282,"mbe_kwh":-0.0819,"total_actual_kwh":3575.072,"total_predicted_kwh":3560.332,"under_5pct":false},{"meter_id":"67003234","cohort":"B","cadence":"native_30min","mape":11.035,"median_mape":5.27,"p95_ape":33.796,"mbe_kwh":-0.0409,"total_actual_kwh":3575.072,"total_predicted_kwh":3560.332,"under_5pct":false},{"meter_id":"67003234","cohort":"B","cadence":"tod_4h","mape":7.063,"median_mape":3.044,"p95_ape":20.167,"mbe_kwh":-0.3275,"total_actual_kwh":3575.072,"total_predicted_kwh":3560.332,"under_5pct":false},{"meter_id":"67003309","cohort":"B","cadence":"dam_15min","mape":13.106,"median_mape":2.305,"p95_ape":18.54,"mbe_kwh":0.0364,"total_actual_kwh":2809.057,"total_predicted_kwh":2834.882,"under_5pct":false},{"meter_id":"67003309","cohort":"B","cadence":"hourly","mape":4.728,"median_mape":2.237,"p95_ape":16.005,"mbe_kwh":0.1644,"total_actual_kwh":2809.057,"total_predicted_kwh":2838.325,"under_5pct":true},{"meter_id":"67003309","cohort":"B","cadence":"native_30min","mape":13.106,"median_mape":2.305,"p95_ape":17.752,"mbe_kwh":0.0727,"total_actual_kwh":2809.057,"total_predicted_kwh":2834.882,"under_5pct":false},{"meter_id":"67003309","cohort":"B","cadence":"tod_4h","mape":3.958,"median_mape":1.802,"p95_ape":13.428,"mbe_kwh":0.7708,"total_actual_kwh":2809.057,"total_predicted_kwh":2843.742,"under_5pct":true},{"meter_id":"67003694","cohort":"B","cadence":"dam_15min","mape":5.808,"median_mape":2.553,"p95_ape":26.672,"mbe_kwh":0.0262,"total_actual_kwh":2198.58,"total_predicted_kwh":2217.425,"under_5pct":false},{"meter_id":"67003694","cohort":"B","cadence":"hourly","mape":4.796,"median_mape":2.452,"p95_ape":20.918,"mbe_kwh":0.1047,"total_actual_kwh":2198.58,"total_predicted_kwh":2217.425,"under_5pct":true},{"meter_id":"67003694","cohort":"B","cadence":"native_30min","mape":5.808,"median_mape":2.553,"p95_ape":26.672,"mbe_kwh":0.0523,"total_actual_kwh":2198.58,"total_predicted_kwh":2217.425,"under_5pct":false},{"meter_id":"67003694","cohort":"B","cadence":"tod_4h","mape":3.345,"median_mape":2.142,"p95_ape":10.22,"mbe_kwh":0.4188,"total_actual_kwh":2198.58,"total_predicted_kwh":2217.425,"under_5pct":true}],"cohorts":[{"cohort":"A","cadence":"dam_15min","mean_mape":4.428,"median_mape":2.371,"n_meters":8},{"cohort":"B","cadence":"dam_15min","mean_mape":8.718,"median_mape":4.095,"n_meters":29},{"cohort":"C","cadence":"dam_15min","mean_mape":19.474,"median_mape":7.244,"n_meters":4},{"cohort":"D","cadence":"dam_15min","mean_mape":75.76,"median_mape":52.986,"n_meters":1},{"cohort":"A","cadence":"hourly","mean_mape":3.796,"median_mape":2.211,"n_meters":8},{"cohort":"B","cadence":"hourly","mean_mape":6.584,"median_mape":3.739,"n_meters":29},{"cohort":"C","cadence":"hourly","mean_mape":14.263,"median_mape":6.315,"n_meters":4},{"cohort":"D","cadence":"hourly","mean_mape":63.044,"median_mape":51.728,"n_meters":1},{"cohort":"A","cadence":"native_30min","mean_mape":4.428,"median_mape":2.371,"n_meters":8},{"cohort":"B","cadence":"native_30min","mean_mape":8.718,"median_mape":4.095,"n_meters":29},{"cohort":"C","cadence":"native_30min","mean_mape":19.474,"median_mape":7.244,"n_meters":4},{"cohort":"D","cadence":"native_30min","mean_mape":75.76,"median_mape":52.986,"n_meters":1},{"cohort":"A","cadence":"tod_4h","mean_mape":3.465,"median_mape":2.035,"n_meters":8},{"cohort":"B","cadence":"tod_4h","mean_mape":5.234,"median_mape":3.189,"n_meters":29},{"cohort":"C","cadence":"tod_4h","mean_mape":11.586,"median_mape":6.03,"n_meters":4},{"cohort":"D","cadence":"tod_4h","mean_mape":101.549,"median_mape":51.968,"n_meters":1}],"forward":[{"meter_id":"50143025","total_predicted_kwh":58.54,"cohort":"B"},{"meter_id":"50154700","total_predicted_kwh":792.49,"cohort":"B"},{"meter_id":"50186364","total_predicted_kwh":835.07,"cohort":"D"},{"meter_id":"51057607","total_predicted_kwh":637.61,"cohort":"B"},{"meter_id":"53401842","total_predicted_kwh":899.81,"cohort":"C"},{"meter_id":"53401885","total_predicted_kwh":751.78,"cohort":"B"},{"meter_id":"53403416","total_predicted_kwh":645.67,"cohort":"B"},{"meter_id":"53407938","total_predicted_kwh":1273.5,"cohort":"A"},{"meter_id":"53408407","total_predicted_kwh":1427.99,"cohort":"A"},{"meter_id":"53408951","total_predicted_kwh":1048.82,"cohort":"B"},{"meter_id":"65000228","total_predicted_kwh":656.04,"cohort":"B"},{"meter_id":"65001891","total_predicted_kwh":1013.64,"cohort":"B"},{"meter_id":"65002231","total_predicted_kwh":1061.3,"cohort":"A"},{"meter_id":"65003102","total_predicted_kwh":508.18,"cohort":"B"},{"meter_id":"65003175","total_predicted_kwh":1124.95,"cohort":"B"},{"meter_id":"65004669","total_predicted_kwh":1016.02,"cohort":"B"},{"meter_id":"65007036","total_predicted_kwh":1802.75,"cohort":"B"},{"meter_id":"65011155","total_predicted_kwh":1490.43,"cohort":"A"},{"meter_id":"65012662","total_predicted_kwh":604.69,"cohort":"B"},{"meter_id":"65015026","total_predicted_kwh":763.92,"cohort":"B"},{"meter_id":"65015739","total_predicted_kwh":591.04,"cohort":"A"},{"meter_id":"65017058","total_predicted_kwh":1217.69,"cohort":"B"},{"meter_id":"65021124","total_predicted_kwh":970.99,"cohort":"C"},{"meter_id":"65021169","total_predicted_kwh":698.7,"cohort":"C"},{"meter_id":"65021964","total_predicted_kwh":771.31,"cohort":"A"},{"meter_id":"65022302","total_predicted_kwh":757.65,"cohort":"B"},{"meter_id":"65022501","total_predicted_kwh":1128.52,"cohort":"A"},{"meter_id":"65023781","total_predicted_kwh":944.28,"cohort":"B"},{"meter_id":"65023784","total_predicted_kwh":808.45,"cohort":"B"},{"meter_id":"65024185","total_predicted_kwh":606.54,"cohort":"B"},{"meter_id":"65024487","total_predicted_kwh":542.03,"cohort":"B"},{"meter_id":"65025443","total_predicted_kwh":1069.21,"cohort":"B"},{"meter_id":"65030697","total_predicted_kwh":554.17,"cohort":"B"},{"meter_id":"65041990","total_predicted_kwh":843.74,"cohort":"B"},{"meter_id":"65044028","total_predicted_kwh":1922.18,"cohort":"B"},{"meter_id":"65045250","total_predicted_kwh":831.3,"cohort":"A"},{"meter_id":"65049719","total_predicted_kwh":1009.03,"cohort":"C"},{"meter_id":"67001151","total_predicted_kwh":14047.38,"cohort":"B"},{"meter_id":"67001818","total_predicted_kwh":9509.66,"cohort":"B"},{"meter_id":"67003234","total_predicted_kwh":13889.72,"cohort":"B"},{"meter_id":"67003309","total_predicted_kwh":12058.85,"cohort":"B"},{"meter_id":"67003694","total_predicted_kwh":8959.86,"cohort":"B"}],"forward_start":"2026-04-21","forward_end":"2026-05-20","cadence_label":{"dam_15min":"15-min DAM","native_30min":"30-min Native","hourly":"Hourly","tod_4h":"ToD 4-hour"},"cadence_order":["dam_15min","native_30min","hourly","tod_4h"]}</script>
+<script>
+const DATA = JSON.parse(document.getElementById('payload').textContent);
+const CADENCE_ORDER = DATA.cadence_order;
+const CADENCE_LABEL = DATA.cadence_label;
+const COHORTS = ['A','B','C','D'];
+
+const STATE = {
+  cadence: 'dam_15min',
+  cohorts: new Set(COHORTS),
+  sort: 'mape_asc',
+};
+
+function classify(mape) {
+  if (mape < 5) return 'green';
+  if (mape < 10) return 'amber';
+  return 'red';
+}
+function fmt(v, d=2) { return Number(v).toFixed(d); }
+
+function renderTiles() {
+  const wrap = document.getElementById('fleet-tiles');
+  wrap.innerHTML = '';
+  DATA.fleet.forEach(t => {
+    let badgeClass, badgeText;
+    if (t.clear_count >= 34) { badgeClass = 'green'; badgeText = 'on target'; }
+    else if (t.clear_count >= 17) { badgeClass = 'amber'; badgeText = 'partial'; }
+    else { badgeClass = 'red'; badgeText = 'gap'; }
+    const div = document.createElement('div');
+    div.className = 'tile ' + badgeClass;
+    div.innerHTML = `
+      <span class="badge ${badgeClass}">${badgeText}</span>
+      <div class="cad">${t.label}</div>
+      <div class="stat-row">
+        <div class="stat"><span class="lbl">Mean MAPE</span><span class="val">${fmt(t.mean_mape, 2)}%</span></div>
+        <div class="stat"><span class="lbl">Median</span><span class="val">${fmt(t.median_mape, 2)}%</span></div>
+      </div>
+      <div class="clear">${t.clear_count}<span class="denom">/${t.total_meters}</span></div>
+      <div class="clear-lbl">meters &lt;5% MAPE</div>
+    `;
+    wrap.appendChild(div);
+  });
+}
+
+function renderControls() {
+  const seg = document.getElementById('cadence-seg');
+  seg.innerHTML = '';
+  CADENCE_ORDER.forEach(c => {
+    const b = document.createElement('button');
+    b.textContent = CADENCE_LABEL[c];
+    if (c === STATE.cadence) b.classList.add('active');
+    b.onclick = () => { STATE.cadence = c; renderControls(); renderTable(); };
+    seg.appendChild(b);
+  });
+  const chips = document.getElementById('cohort-chips');
+  chips.innerHTML = '';
+  COHORTS.forEach(co => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (STATE.cohorts.has(co) ? ' active' : '');
+    b.textContent = 'Cohort ' + co;
+    b.onclick = () => {
+      if (STATE.cohorts.has(co)) STATE.cohorts.delete(co); else STATE.cohorts.add(co);
+      if (STATE.cohorts.size === 0) STATE.cohorts = new Set(COHORTS);
+      renderControls(); renderTable();
+    };
+    chips.appendChild(b);
+  });
+  document.getElementById('sort-sel').value = STATE.sort;
+  document.getElementById('sort-sel').onchange = (e) => { STATE.sort = e.target.value; renderTable(); };
+}
+
+function renderTable() {
+  const tbody = document.getElementById('meter-tbody');
+  tbody.innerHTML = '';
+  let rows = DATA.meters.filter(r => r.cadence === STATE.cadence && STATE.cohorts.has(r.cohort));
+  if (STATE.sort === 'mape_asc') rows.sort((a,b) => a.mape - b.mape);
+  else if (STATE.sort === 'mape_desc') rows.sort((a,b) => b.mape - a.mape);
+  else rows.sort((a,b) => b.total_actual_kwh - a.total_actual_kwh);
+  rows.forEach(r => {
+    const cls = classify(r.mape);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="mono">${r.meter_id}</td>
+      <td><span class="cohort-tag ${r.cohort}">${r.cohort}</span></td>
+      <td class="num">${fmt(r.mape, 2)}</td>
+      <td class="num">${fmt(r.median_mape, 2)}</td>
+      <td class="num">${fmt(r.p95_ape, 2)}</td>
+      <td class="num">${fmt(r.mbe_kwh, 4)}</td>
+      <td class="num">${fmt(r.total_actual_kwh, 2)}</td>
+      <td><span class="status-chip ${cls}">${cls === 'green' ? 'on target' : cls === 'amber' ? '5-10%' : '>10%'}</span></td>
+    `;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('meter-count').textContent =
+    `${rows.length} meter${rows.length === 1 ? '' : 's'} - ${CADENCE_LABEL[STATE.cadence]}`;
+}
+
+function renderForward() {
+  const tbody = document.getElementById('fwd-tbody');
+  tbody.innerHTML = '';
+  const sorted = [...DATA.forward].sort((a,b) => b.total_predicted_kwh - a.total_predicted_kwh);
+  sorted.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="mono">${r.meter_id}</td>
+      <td><span class="cohort-tag ${r.cohort}">${r.cohort}</span></td>
+      <td class="num">${fmt(r.total_predicted_kwh, 2)}</td>
+      <td><span class="status-chip amber">pending T+1</span></td>
+    `;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('fwd-range').textContent =
+    `${DATA.forward_start} -> ${DATA.forward_end} (per-meter total predicted kWh)`;
+}
+
+function renderChart() {
+  const colors = {
+    dam_15min: '#ef4444',
+    native_30min: '#f59e0b',
+    hourly: '#14b8a6',
+    tod_4h: '#10b981',
+  };
+  const datasets = CADENCE_ORDER.map(cad => ({
+    label: CADENCE_LABEL[cad],
+    backgroundColor: colors[cad],
+    borderColor: colors[cad],
+    borderWidth: 1,
+    data: COHORTS.map(co => {
+      const m = DATA.cohorts.find(r => r.cohort === co && r.cadence === cad);
+      return m ? m.mean_mape : 0;
+    }),
+  }));
+  const ctx = document.getElementById('cohortChart').getContext('2d');
+  new Chart(ctx, {
+    type: 'bar',
+    data: { labels: COHORTS.map(c => 'Cohort ' + c), datasets: datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        y: {
+          beginAtZero: true,
+          title: { display: true, text: 'Mean MAPE (%)', color: '#a1a1aa' },
+          ticks: { color: '#a1a1aa' },
+          grid: { color: 'rgba(255,255,255,0.05)' },
+        },
+        x: { ticks: { color: '#a1a1aa' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+      },
+      plugins: {
+        legend: { labels: { color: '#fafaf9' } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}%`
+          }
+        },
+        annotation: {}
+      }
+    },
+    plugins: [{
+      id: 'targetLine',
+      afterDraw(chart) {
+        const { ctx, chartArea: { left, right }, scales: { y } } = chart;
+        const yPos = y.getPixelForValue(5);
+        ctx.save();
+        ctx.strokeStyle = '#14b8a6';
+        ctx.setLineDash([6, 4]);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(left, yPos); ctx.lineTo(right, yPos); ctx.stroke();
+        ctx.fillStyle = '#14b8a6';
+        ctx.font = '11px JetBrains Mono';
+        ctx.fillText('5% target', right - 70, yPos - 5);
+        ctx.restore();
+      }
+    }]
+  });
+}
+
+renderTiles();
+renderControls();
+renderTable();
+renderForward();
+renderChart();
+</script>
+</body>
+</html>

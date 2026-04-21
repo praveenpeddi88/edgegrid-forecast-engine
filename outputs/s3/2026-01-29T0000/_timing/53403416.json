@@ -1,0 +1,10 @@
+{
+  "msn": "53403416",
+  "origin": "2026-01-29T00:00:00",
+  "load_s": 0.5,
+  "train_s": 3.28,
+  "forecast_s": 27.34,
+  "total_s": 31.15,
+  "bundle_holdout_mape": 6.39,
+  "n_horizon": 336
+}

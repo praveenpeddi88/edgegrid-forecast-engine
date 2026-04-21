@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>EdgeGrid — Network View</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<style>
+  :root{
+    --bg: #09090b;              /* zinc-950 */
+    --bg-soft: #0f0f12;
+    --panel: #141419;
+    --panel-edge: #232329;
+    --ink: #e4e4e7;
+    --ink-dim: #a1a1aa;
+    --ink-faint: #52525b;
+    --teal: #14b8a6;
+    --teal-soft: #0d9488;
+    --teal-ghost: rgba(20,184,166,.14);
+    --green: #10b981;
+    --amber: #f59e0b;
+    --red:   #ef4444;
+    --purple:#a78bfa;
+    --yellow:#fbbf24;
+    --cyan:  #22d3ee;
+    --pink:  #f472b6;
+    --orange:#fb923c;
+    --slate: #94a3b8;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;padding:0}
+  body{
+    font-family:'Poppins',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    background: radial-gradient(1400px 900px at 30% -10%, rgba(20,184,166,.08), transparent 60%),
+                radial-gradient(1000px 700px at 110% 110%, rgba(167,139,250,.06), transparent 60%),
+                var(--bg);
+    color:var(--ink);
+    overflow:hidden;
+    font-feature-settings:"ss01","cv11";
+    -webkit-font-smoothing:antialiased;
+  }
+  .shell{display:grid;grid-template-rows:auto 1fr auto;height:100vh}
+  /* Top bar */
+  header{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px 22px;border-bottom:1px solid var(--panel-edge);
+    background:linear-gradient(180deg, rgba(255,255,255,.02), transparent);
+  }
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand .dot{
+    width:10px;height:10px;border-radius:50%;
+    background:var(--teal);box-shadow:0 0 14px rgba(20,184,166,.6);
+  }
+  .brand h1{
+    margin:0;font-size:15px;font-weight:600;letter-spacing:.02em;
+  }
+  .brand .sub{color:var(--ink-dim);font-size:12px;font-weight:400;margin-left:8px}
+  .meta{
+    display:flex;align-items:center;gap:18px;
+    font-size:12px;color:var(--ink-dim);font-family:'JetBrains Mono',monospace;
+  }
+  .meta b{color:var(--ink);font-weight:500}
+  /* Stage */
+  .stage{position:relative;overflow:hidden}
+  svg.network{position:absolute;inset:0;width:100%;height:100%;cursor:grab}
+  svg.network:active{cursor:grabbing}
+  /* Drilldown panel */
+  .panel{
+    position:absolute;top:16px;right:16px;width:360px;max-height:calc(100% - 32px);
+    background:rgba(20,20,25,.82);backdrop-filter:blur(12px);
+    border:1px solid var(--panel-edge);border-radius:14px;
+    padding:18px 18px 14px;overflow:auto;
+    box-shadow:0 20px 50px rgba(0,0,0,.5);
+    transition:opacity .18s ease, transform .18s ease;
+  }
+  .panel.hidden{opacity:0;pointer-events:none;transform:translateY(-4px)}
+  .panel .eyebrow{
+    font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--ink-faint);font-weight:500;
+  }
+  .panel h2{
+    margin:4px 0 10px;font-size:17px;font-weight:600;line-height:1.25;
+  }
+  .panel .kv{
+    display:grid;grid-template-columns:auto 1fr;gap:6px 14px;
+    font-size:12.5px;align-items:baseline;
+  }
+  .panel .kv dt{color:var(--ink-dim);font-weight:400}
+  .panel .kv dd{margin:0;color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:12px}
+  .panel .section{
+    border-top:1px solid var(--panel-edge);margin-top:14px;padding-top:12px;
+  }
+  .panel .section-title{
+    font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--ink-dim);margin-bottom:8px;font-weight:500;
+  }
+  .pill{
+    display:inline-flex;align-items:center;gap:6px;
+    font-size:11px;padding:3px 9px;border-radius:999px;
+    background:var(--teal-ghost);color:var(--teal);border:1px solid rgba(20,184,166,.22);
+    font-weight:500;
+  }
+  .pill.green{background:rgba(16,185,129,.12);color:var(--green);border-color:rgba(16,185,129,.25)}
+  .pill.amber{background:rgba(245,158,11,.12);color:var(--amber);border-color:rgba(245,158,11,.25)}
+  .pill.red{background:rgba(239,68,68,.12);color:var(--red);border-color:rgba(239,68,68,.25)}
+  .health-strip{display:flex;gap:4px;margin-top:4px}
+  .health-strip .seg{
+    height:3px;flex:1;border-radius:2px;background:var(--panel-edge);
+  }
+  .hint{
+    position:absolute;bottom:16px;left:16px;font-size:11px;color:var(--ink-faint);
+    font-family:'JetBrains Mono',monospace;letter-spacing:.02em;
+  }
+  .close-x{
+    position:absolute;top:10px;right:12px;color:var(--ink-faint);cursor:pointer;
+    font-size:16px;line-height:1;padding:4px;border:none;background:transparent;
+  }
+  .close-x:hover{color:var(--ink)}
+  /* Legend */
+  footer{
+    display:flex;align-items:center;gap:22px;flex-wrap:wrap;
+    padding:10px 22px;border-top:1px solid var(--panel-edge);
+    font-size:11px;color:var(--ink-dim);background:rgba(9,9,11,.6);
+  }
+  .legend{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .legend .item{display:flex;align-items:center;gap:6px}
+  .legend .swatch{width:10px;height:10px;border-radius:50%}
+  .legend .swatch.sq{border-radius:2px}
+  .legend .divider{width:1px;height:14px;background:var(--panel-edge);margin:0 4px}
+  .tooltip{
+    position:absolute;pointer-events:none;
+    background:rgba(20,20,25,.96);border:1px solid var(--panel-edge);
+    border-radius:8px;padding:8px 10px;font-size:11.5px;
+    font-family:'JetBrains Mono',monospace;color:var(--ink);
+    box-shadow:0 12px 30px rgba(0,0,0,.45);
+    transition:opacity .12s ease;opacity:0;max-width:260px;line-height:1.5;
+  }
+  .tooltip .ttl{font-family:'Poppins',sans-serif;font-weight:600;font-size:12.5px;margin-bottom:2px}
+  .tooltip .sub{color:var(--ink-dim);font-size:10.5px;margin-bottom:4px}
+  /* Node hover halo */
+  .node:hover circle{stroke-width:2.5px}
+  .link{stroke-opacity:.35;transition:stroke-opacity .15s}
+  .link.faded{stroke-opacity:.04}
+  .node.faded{opacity:.15}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <div class="brand">
+      <div class="dot"></div>
+      <h1>EdgeGrid <span style="color:var(--ink-faint);font-weight:400">·</span> Network View
+        <span class="sub">prototype · v0</span>
+      </h1>
+    </div>
+    <div class="meta">
+      <span><b id="m-nodes">0</b> nodes</span>
+      <span><b id="m-edges">0</b> edges</span>
+      <span><b id="m-meters">0</b> meters</span>
+      <span><b id="m-health">—</b> mean MAPE</span>
+    </div>
+  </header>
+
+  <div class="stage" id="stage">
+    <svg class="network" id="svg"></svg>
+    <aside class="panel hidden" id="panel">
+      <button class="close-x" id="close-x" aria-label="Close">×</button>
+      <div id="panel-body"></div>
+    </aside>
+    <div class="hint">drag · scroll to zoom · click a node to drill in</div>
+    <div class="tooltip" id="tip"></div>
+  </div>
+
+  <footer>
+    <div class="legend">
+      <div class="item"><span class="swatch sq" style="background:var(--teal)"></span>Substation</div>
+      <div class="item"><span class="swatch sq" style="background:var(--slate)"></span>Feeder</div>
+      <div class="item"><span class="swatch" style="background:var(--green)"></span>Meter · MAPE &lt;8%</div>
+      <div class="item"><span class="swatch" style="background:var(--amber)"></span>Meter · 8–12%</div>
+      <div class="item"><span class="swatch" style="background:var(--red)"></span>Meter · &gt;12%</div>
+      <div class="divider"></div>
+      <div class="item"><span class="swatch" style="background:var(--purple)"></span>BESS</div>
+      <div class="item"><span class="swatch" style="background:var(--yellow)"></span>Solar</div>
+      <div class="item"><span class="swatch" style="background:var(--pink)"></span>C&amp;I Load</div>
+      <div class="item"><span class="swatch" style="background:var(--cyan)"></span>Weather</div>
+      <div class="item"><span class="swatch" style="background:var(--orange)"></span>IEX</div>
+    </div>
+  </footer>
+</div>
+
+<script id="network-data" type="application/json">{"nodes":[{"id":"weather-vskp","label":"Visakhapatnam weather cell","kind":"weather","lat":17.72,"lon":83.3,"cell_resolution_km":10.0},{"id":"iex-dam","label":"IEX DAM (15-min)","kind":"iex","market":"IEX-DAM","block_minutes":15},{"id":"ss-vskp-01","label":"Madhurawada 33/11kV","kind":"substation","substation_code":"VSKP-MW-01","zone":"Visakhapatnam Zone 1","landed_cost_inr_per_kwh":8.2,"tariff_regime":"APEPDCL-HT-2024","lat":17.7908,"lon":83.3768,"total_contracted_kva":2400},{"id":"bess-vskp-01a","label":"BESS 1.0 MWh / 4h","kind":"bess","capacity_mwh":1.0,"duration_h":4,"c_rate":0.25,"round_trip_efficiency":0.9,"soc_pct":50.0,"cycle_count":0,"degradation_pct":0.0,"capex_inr_per_kwh":25000.0,"substation_id":"ss-vskp-01"},{"id":"bess-vskp-01b","label":"BESS 0.5 MWh / 4h","kind":"bess","capacity_mwh":0.5,"duration_h":4,"c_rate":0.25,"round_trip_efficiency":0.9,"soc_pct":50.0,"cycle_count":0,"degradation_pct":0.0,"capex_inr_per_kwh":25000.0,"substation_id":"ss-vskp-01"},{"id":"solar-ss-vskp-01","label":"Solar 750 kWp","kind":"solar","kwp":750.0,"tilt_deg":17.0,"azimuth_deg":180.0,"soiling_pct":2.0,"substation_id":"ss-vskp-01"},{"id":"ci-ss-vskp-01-1","label":"C&I VSKP-MW-01-L1","kind":"ci_load","contracted_kva":750.0,"tod_pattern":"office-hours","ppa_inr_per_kwh":null,"substation_id":"ss-vskp-01"},{"id":"ci-ss-vskp-01-2","label":"C&I VSKP-MW-01-L2","kind":"ci_load","contracted_kva":1000.0,"tod_pattern":"24x7","ppa_inr_per_kwh":null,"substation_id":"ss-vskp-01"},{"id":"feeder-ss-vskp-01-1","label":"Feeder VSKP-MW-01-F1","kind":"feeder","feeder_code":"VSKP-MW-01-F1","capacity_kw":500.0,"loss_factor":0.04,"substation_id":"ss-vskp-01"},{"id":"feeder-ss-vskp-01-2","label":"Feeder VSKP-MW-01-F2","kind":"feeder","feeder_code":"VSKP-MW-01-F2","capacity_kw":500.0,"loss_factor":0.04,"substation_id":"ss-vskp-01"},{"id":"feeder-ss-vskp-01-3","label":"Feeder VSKP-MW-01-F3","kind":"feeder","feeder_code":"VSKP-MW-01-F3","capacity_kw":500.0,"loss_factor":0.04,"substation_id":"ss-vskp-01"},{"id":"meter-67001818","label":"MSN 67001818","kind":"meter","msn":"67001818","tier":"HT (>5kWh)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":8.51,"historical_block_mape":{"night":9.71,"morning":6.14,"solar":8.0,"peak":9.5},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-01-1","substation_id":"ss-vskp-01","lat":17.777248592708805,"lon":83.38643822875974},{"id":"meter-67003234","label":"MSN 67003234","kind":"meter","msn":"67003234","tier":"HT (>5kWh)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":10.59,"historical_block_mape":{"night":15.71,"morning":16.46,"solar":6.02,"peak":3.33},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-01-2","substation_id":"ss-vskp-01","lat":17.778623901258193,"lon":83.3792836401771},{"id":"meter-67003309","label":"MSN 67003309","kind":"meter","msn":"67003309","tier":"HT (>5kWh)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":13.44,"historical_block_mape":{"night":8.42,"morning":9.12,"solar":26.7,"peak":1.49},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-01-3","substation_id":"ss-vskp-01","lat":17.803091121894294,"lon":83.36824094542507},{"id":"meter-67003694","label":"MSN 67003694","kind":"meter","msn":"67003694","tier":"HT (>5kWh)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":5.54,"historical_block_mape":{"night":5.07,"morning":12.9,"solar":4.43,"peak":1.24},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-01-1","substation_id":"ss-vskp-01","lat":17.778378417010675,"lon":83.37434516454113},{"id":"meter-67001151","label":"MSN 67001151","kind":"meter","msn":"67001151","tier":"HT (>5kWh)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":6.34,"historical_block_mape":{"night":9.03,"morning":9.19,"solar":4.57,"peak":1.61},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-01-2","substation_id":"ss-vskp-01","lat":17.78301989000381,"lon":83.37833141761375},{"id":"meter-53408951","label":"MSN 53408951","kind":"meter","msn":"53408951","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":7.31,"historical_block_mape":{"night":6.64,"morning":6.0,"solar":10.02,"peak":4.51},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-01-3","substation_id":"ss-vskp-01","lat":17.77757331518237,"lon":83.3787636108258},{"id":"meter-65000228","label":"MSN 65000228","kind":"meter","msn":"65000228","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":7.18,"historical_block_mape":{"night":6.41,"morning":3.71,"solar":10.87,"peak":4.9},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-01-1","substation_id":"ss-vskp-01","lat":17.804223491021226,"lon":83.38071877747196},{"id":"meter-65021124","label":"MSN 65021124","kind":"meter","msn":"65021124","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":18.29,"historical_block_mape":{"night":43.32,"morning":9.2,"solar":8.46,"peak":4.93},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-01-2","substation_id":"ss-vskp-01","lat":17.79328990713381,"lon":83.36365586145008},{"id":"meter-65045250","label":"MSN 65045250","kind":"meter","msn":"65045250","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":3.25,"historical_block_mape":{"night":4.53,"morning":2.79,"solar":2.8,"peak":2.0},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-01-3","substation_id":"ss-vskp-01","lat":17.793366242679213,"lon":83.3632876794017},{"id":"meter-65003102","label":"MSN 65003102","kind":"meter","msn":"65003102","tier":"Small (<500)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":6.36,"historical_block_mape":{"night":5.62,"morning":6.74,"solar":8.95,"peak":2.29},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-01-1","substation_id":"ss-vskp-01","lat":17.78243245470373,"lon":83.37849994693812},{"id":"meter-65012662","label":"MSN 65012662","kind":"meter","msn":"65012662","tier":"Small (<500)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":5.71,"historical_block_mape":{"night":5.3,"morning":5.48,"solar":7.63,"peak":2.92},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-01-2","substation_id":"ss-vskp-01","lat":17.77979524449325,"lon":83.37437417130715},{"id":"meter-65021964","label":"MSN 65021964","kind":"meter","msn":"65021964","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":3.75,"historical_block_mape":{"night":3.88,"morning":3.44,"solar":4.67,"peak":2.0},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-01-3","substation_id":"ss-vskp-01","lat":17.792020576565964,"lon":83.3789274106894},{"id":"meter-65002231","label":"MSN 65002231","kind":"meter","msn":"65002231","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":4.67,"historical_block_mape":{"night":5.36,"morning":2.8,"solar":5.42,"peak":3.65},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-01-1","substation_id":"ss-vskp-01","lat":17.792607718310386,"lon":83.38226008084284},{"id":"meter-65021169","label":"MSN 65021169","kind":"meter","msn":"65021169","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":18.07,"historical_block_mape":{"night":46.75,"morning":15.04,"solar":19.16,"peak":12.52},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-01-2","substation_id":"ss-vskp-01","lat":17.77889167137331,"lon":83.37893613174235},{"id":"ss-vskp-02","label":"Gajuwaka 33/11kV","kind":"substation","substation_code":"VSKP-GJ-02","zone":"Visakhapatnam Zone 2","landed_cost_inr_per_kwh":8.45,"tariff_regime":"APEPDCL-HT-2024","lat":17.6868,"lon":83.2093,"total_contracted_kva":1800},{"id":"bess-vskp-02a","label":"BESS 1.0 MWh / 4h","kind":"bess","capacity_mwh":1.0,"duration_h":4,"c_rate":0.25,"round_trip_efficiency":0.9,"soc_pct":50.0,"cycle_count":0,"degradation_pct":0.0,"capex_inr_per_kwh":25000.0,"substation_id":"ss-vskp-02"},{"id":"solar-ss-vskp-02","label":"Solar 500 kWp","kind":"solar","kwp":500.0,"tilt_deg":17.0,"azimuth_deg":180.0,"soiling_pct":2.0,"substation_id":"ss-vskp-02"},{"id":"ci-ss-vskp-02-1","label":"C&I VSKP-GJ-02-L1","kind":"ci_load","contracted_kva":500.0,"tod_pattern":"manufacturing","ppa_inr_per_kwh":null,"substation_id":"ss-vskp-02"},{"id":"ci-ss-vskp-02-2","label":"C&I VSKP-GJ-02-L2","kind":"ci_load","contracted_kva":250.0,"tod_pattern":"24x7","ppa_inr_per_kwh":null,"substation_id":"ss-vskp-02"},{"id":"feeder-ss-vskp-02-1","label":"Feeder VSKP-GJ-02-F1","kind":"feeder","feeder_code":"VSKP-GJ-02-F1","capacity_kw":500.0,"loss_factor":0.04,"substation_id":"ss-vskp-02"},{"id":"feeder-ss-vskp-02-2","label":"Feeder VSKP-GJ-02-F2","kind":"feeder","feeder_code":"VSKP-GJ-02-F2","capacity_kw":500.0,"loss_factor":0.04,"substation_id":"ss-vskp-02"},{"id":"feeder-ss-vskp-02-3","label":"Feeder VSKP-GJ-02-F3","kind":"feeder","feeder_code":"VSKP-GJ-02-F3","capacity_kw":500.0,"loss_factor":0.04,"substation_id":"ss-vskp-02"},{"id":"meter-65041990","label":"MSN 65041990","kind":"meter","msn":"65041990","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":12.88,"historical_block_mape":{"night":15.29,"morning":30.56,"solar":6.62,"peak":3.39},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-02-1","substation_id":"ss-vskp-02","lat":17.693163322972385,"lon":83.211231048794},{"id":"meter-65011155","label":"MSN 65011155","kind":"meter","msn":"65011155","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":4.71,"historical_block_mape":{"night":5.51,"morning":3.64,"solar":5.52,"peak":2.59},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-02-2","substation_id":"ss-vskp-02","lat":17.690370287795208,"lon":83.2091924348534},{"id":"meter-53408407","label":"MSN 53408407","kind":"meter","msn":"53408407","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":4.82,"historical_block_mape":{"night":4.09,"morning":1.92,"solar":7.22,"peak":4.39},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-02-3","substation_id":"ss-vskp-02","lat":17.687751607397406,"lon":83.21761686324942},{"id":"meter-65022501","label":"MSN 65022501","kind":"meter","msn":"65022501","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":4.61,"historical_block_mape":{"night":5.61,"morning":3.01,"solar":4.64,"peak":4.13},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-02-1","substation_id":"ss-vskp-02","lat":17.685768055975192,"lon":83.22200324150917},{"id":"meter-65025443","label":"MSN 65025443","kind":"meter","msn":"65025443","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":9.8,"historical_block_mape":{"night":6.43,"morning":4.0,"solar":18.5,"peak":5.03},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-02-2","substation_id":"ss-vskp-02","lat":17.68264747067834,"lon":83.20175279754572},{"id":"meter-65015739","label":"MSN 65015739","kind":"meter","msn":"65015739","tier":"Small (<500)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":4.53,"historical_block_mape":{"night":3.98,"morning":2.92,"solar":6.96,"peak":2.4},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-02-3","substation_id":"ss-vskp-02","lat":17.677193002487495,"lon":83.21769488891752},{"id":"meter-65015026","label":"MSN 65015026","kind":"meter","msn":"65015026","tier":"Small (<500)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":7.88,"historical_block_mape":{"night":6.97,"morning":4.5,"solar":11.37,"peak":6.17},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-02-1","substation_id":"ss-vskp-02","lat":17.674255650323875,"lon":83.20330747355636},{"id":"meter-65044028","label":"MSN 65044028","kind":"meter","msn":"65044028","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":8.02,"historical_block_mape":{"night":12.98,"morning":9.77,"solar":4.8,"peak":2.92},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-02-2","substation_id":"ss-vskp-02","lat":17.68665349078666,"lon":83.20460427069875},{"id":"meter-65003175","label":"MSN 65003175","kind":"meter","msn":"65003175","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":8.21,"historical_block_mape":{"night":11.35,"morning":6.66,"solar":7.72,"peak":4.45},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-02-3","substation_id":"ss-vskp-02","lat":17.685265025712834,"lon":83.2125687705711},{"id":"meter-65022302","label":"MSN 65022302","kind":"meter","msn":"65022302","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":13.4,"historical_block_mape":{"night":23.05,"morning":19.69,"solar":5.3,"peak":3.61},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-02-1","substation_id":"ss-vskp-02","lat":17.67399602602379,"lon":83.20965798491943},{"id":"meter-53401842","label":"MSN 53401842","kind":"meter","msn":"53401842","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":15.24,"historical_block_mape":{"night":6.69,"morning":4.29,"solar":31.69,"peak":10.53},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-02-2","substation_id":"ss-vskp-02","lat":17.67674886310931,"lon":83.20456167418479},{"id":"meter-65001891","label":"MSN 65001891","kind":"meter","msn":"65001891","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":5.54,"historical_block_mape":{"night":8.05,"morning":8.99,"solar":3.28,"peak":1.58},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-02-3","substation_id":"ss-vskp-02","lat":17.69979810636542,"lon":83.20695095063431},{"id":"meter-65023781","label":"MSN 65023781","kind":"meter","msn":"65023781","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":5.81,"historical_block_mape":{"night":8.51,"morning":5.45,"solar":4.08,"peak":4.27},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-02-1","substation_id":"ss-vskp-02","lat":17.700660572502365,"lon":83.19662861446542},{"id":"meter-65049719","label":"MSN 65049719","kind":"meter","msn":"65049719","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":16.27,"historical_block_mape":{"night":23.87,"morning":23.53,"solar":10.56,"peak":5.17},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-02-2","substation_id":"ss-vskp-02","lat":17.688542272579603,"lon":83.21797282514471},{"id":"ss-vskp-03","label":"Pendurthi 33/11kV","kind":"substation","substation_code":"VSKP-PD-03","zone":"Visakhapatnam Zone 3","landed_cost_inr_per_kwh":8.05,"tariff_regime":"APEPDCL-HT-2024","lat":17.7923,"lon":83.187,"total_contracted_kva":1500},{"id":"bess-vskp-03a","label":"BESS 0.5 MWh / 4h","kind":"bess","capacity_mwh":0.5,"duration_h":4,"c_rate":0.25,"round_trip_efficiency":0.9,"soc_pct":50.0,"cycle_count":0,"degradation_pct":0.0,"capex_inr_per_kwh":25000.0,"substation_id":"ss-vskp-03"},{"id":"solar-ss-vskp-03","label":"Solar 400 kWp","kind":"solar","kwp":400.0,"tilt_deg":17.0,"azimuth_deg":180.0,"soiling_pct":2.0,"substation_id":"ss-vskp-03"},{"id":"ci-ss-vskp-03-1","label":"C&I VSKP-PD-03-L1","kind":"ci_load","contracted_kva":750.0,"tod_pattern":"manufacturing","ppa_inr_per_kwh":null,"substation_id":"ss-vskp-03"},{"id":"ci-ss-vskp-03-2","label":"C&I VSKP-PD-03-L2","kind":"ci_load","contracted_kva":750.0,"tod_pattern":"24x7","ppa_inr_per_kwh":null,"substation_id":"ss-vskp-03"},{"id":"feeder-ss-vskp-03-1","label":"Feeder VSKP-PD-03-F1","kind":"feeder","feeder_code":"VSKP-PD-03-F1","capacity_kw":500.0,"loss_factor":0.04,"substation_id":"ss-vskp-03"},{"id":"feeder-ss-vskp-03-2","label":"Feeder VSKP-PD-03-F2","kind":"feeder","feeder_code":"VSKP-PD-03-F2","capacity_kw":500.0,"loss_factor":0.04,"substation_id":"ss-vskp-03"},{"id":"feeder-ss-vskp-03-3","label":"Feeder VSKP-PD-03-F3","kind":"feeder","feeder_code":"VSKP-PD-03-F3","capacity_kw":500.0,"loss_factor":0.04,"substation_id":"ss-vskp-03"},{"id":"meter-53407938","label":"MSN 53407938","kind":"meter","msn":"53407938","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":3.19,"historical_block_mape":{"night":3.87,"morning":1.65,"solar":3.67,"peak":2.41},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-03-1","substation_id":"ss-vskp-03","lat":17.79220024385897,"lon":83.19590675927465},{"id":"meter-65004669","label":"MSN 65004669","kind":"meter","msn":"65004669","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":6.63,"historical_block_mape":{"night":4.84,"morning":3.4,"solar":8.55,"peak":9.66},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-03-2","substation_id":"ss-vskp-03","lat":17.779362888482208,"lon":83.17480787988261},{"id":"meter-65023784","label":"MSN 65023784","kind":"meter","msn":"65023784","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":7.01,"historical_block_mape":{"night":8.07,"morning":6.96,"solar":7.49,"peak":4.0},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-03-3","substation_id":"ss-vskp-03","lat":17.785398178313844,"lon":83.19291126203481},{"id":"meter-53401885","label":"MSN 53401885","kind":"meter","msn":"53401885","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":7.84,"historical_block_mape":{"night":6.89,"morning":3.75,"solar":11.66,"peak":6.5},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-03-1","substation_id":"ss-vskp-03","lat":17.779249999271485,"lon":83.19393478003923},{"id":"meter-65030697","label":"MSN 65030697","kind":"meter","msn":"65030697","tier":"Small (<500)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":7.1,"historical_block_mape":{"night":6.03,"morning":10.61,"solar":8.61,"peak":2.73},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-03-2","substation_id":"ss-vskp-03","lat":17.786588221295283,"lon":83.18933838692153},{"id":"meter-65024185","label":"MSN 65024185","kind":"meter","msn":"65024185","tier":"Small (<500)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":7.12,"historical_block_mape":{"night":3.68,"morning":4.53,"solar":11.17,"peak":8.54},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-03-3","substation_id":"ss-vskp-03","lat":17.79773711524202,"lon":83.18536922301753},{"id":"meter-50154700","label":"MSN 50154700","kind":"meter","msn":"50154700","tier":"Medium (0.5-1.5k)","phase":"1PH","mean_demand_wh":0.0,"holdout_mape":5.23,"historical_block_mape":{"night":4.38,"morning":4.89,"solar":6.22,"peak":5.32},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-03-1","substation_id":"ss-vskp-03","lat":17.79879883383195,"lon":83.19861120876715},{"id":"meter-65007036","label":"MSN 65007036","kind":"meter","msn":"65007036","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":6.86,"historical_block_mape":{"night":9.11,"morning":8.34,"solar":6.12,"peak":2.33},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-03-2","substation_id":"ss-vskp-03","lat":17.787710157670656,"lon":83.20021945699938},{"id":"meter-50186364","label":"MSN 50186364","kind":"meter","msn":"50186364","tier":"Medium (0.5-1.5k)","phase":"1PH","mean_demand_wh":0.0,"holdout_mape":52.24,"historical_block_mape":{"night":79.42,"morning":9.14,"solar":46.59,"peak":53.43},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-03-3","substation_id":"ss-vskp-03","lat":17.78796392328621,"lon":83.19032758630449},{"id":"meter-65017058","label":"MSN 65017058","kind":"meter","msn":"65017058","tier":"Medium (0.5-1.5k)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":5.88,"historical_block_mape":{"night":5.61,"morning":4.14,"solar":7.93,"peak":4.01},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-03-1","substation_id":"ss-vskp-03","lat":17.79211078983671,"lon":83.17854623324459},{"id":"meter-51057607","label":"MSN 51057607","kind":"meter","msn":"51057607","tier":"Small (<500)","phase":"1PH","mean_demand_wh":0.0,"holdout_mape":12.67,"historical_block_mape":{"night":17.87,"morning":7.6,"solar":13.97,"peak":4.97},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-03-2","substation_id":"ss-vskp-03","lat":17.785922957794966,"lon":83.19415090138784},{"id":"meter-53403416","label":"MSN 53403416","kind":"meter","msn":"53403416","tier":"Small (<500)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":14.77,"historical_block_mape":{"night":6.11,"morning":2.5,"solar":31.86,"peak":10.19},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-03-3","substation_id":"ss-vskp-03","lat":17.789236930356388,"lon":83.1995044867854},{"id":"meter-65024487","label":"MSN 65024487","kind":"meter","msn":"65024487","tier":"Small (<500)","phase":"3PH","mean_demand_wh":0.0,"holdout_mape":11.26,"historical_block_mape":{"night":13.08,"morning":15.69,"solar":10.14,"peak":5.41},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-03-1","substation_id":"ss-vskp-03","lat":17.792195200970898,"lon":83.17699098847416},{"id":"meter-50143025","label":"MSN 50143025","kind":"meter","msn":"50143025","tier":"Small (<500)","phase":"1PH","mean_demand_wh":0.0,"holdout_mape":13.76,"historical_block_mape":{"night":30.4,"morning":12.06,"solar":14.42,"peak":11.34},"n_features_selected":39,"feeder_id":"feeder-ss-vskp-03-2","substation_id":"ss-vskp-03","lat":17.78934932769003,"lon":83.18033517392354}],"edges":[{"source":"iex-dam","target":"ss-vskp-01","edge_type":"prices","attrs":{}},{"source":"weather-vskp","target":"ss-vskp-01","edge_type":"observes","attrs":{}},{"source":"bess-vskp-01a","target":"ss-vskp-01","edge_type":"dispatches","attrs":{}},{"source":"bess-vskp-01b","target":"ss-vskp-01","edge_type":"dispatches","attrs":{}},{"source":"solar-ss-vskp-01","target":"ss-vskp-01","edge_type":"feeds","attrs":{}},{"source":"ss-vskp-01","target":"ci-ss-vskp-01-1","edge_type":"serves","attrs":{}},{"source":"ss-vskp-01","target":"ci-ss-vskp-01-2","edge_type":"serves","attrs":{}},{"source":"feeder-ss-vskp-01-1","target":"ss-vskp-01","edge_type":"feeds","attrs":{}},{"source":"feeder-ss-vskp-01-2","target":"ss-vskp-01","edge_type":"feeds","attrs":{}},{"source":"feeder-ss-vskp-01-3","target":"ss-vskp-01","edge_type":"feeds","attrs":{}},{"source":"meter-67001818","target":"feeder-ss-vskp-01-1","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-67001818","edge_type":"observes","attrs":{}},{"source":"meter-67003234","target":"feeder-ss-vskp-01-2","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-67003234","edge_type":"observes","attrs":{}},{"source":"meter-67003309","target":"feeder-ss-vskp-01-3","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-67003309","edge_type":"observes","attrs":{}},{"source":"meter-67003694","target":"feeder-ss-vskp-01-1","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-67003694","edge_type":"observes","attrs":{}},{"source":"meter-67001151","target":"feeder-ss-vskp-01-2","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-67001151","edge_type":"observes","attrs":{}},{"source":"meter-53408951","target":"feeder-ss-vskp-01-3","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-53408951","edge_type":"observes","attrs":{}},{"source":"meter-65000228","target":"feeder-ss-vskp-01-1","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65000228","edge_type":"observes","attrs":{}},{"source":"meter-65021124","target":"feeder-ss-vskp-01-2","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65021124","edge_type":"observes","attrs":{}},{"source":"meter-65045250","target":"feeder-ss-vskp-01-3","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65045250","edge_type":"observes","attrs":{}},{"source":"meter-65003102","target":"feeder-ss-vskp-01-1","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65003102","edge_type":"observes","attrs":{}},{"source":"meter-65012662","target":"feeder-ss-vskp-01-2","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65012662","edge_type":"observes","attrs":{}},{"source":"meter-65021964","target":"feeder-ss-vskp-01-3","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65021964","edge_type":"observes","attrs":{}},{"source":"meter-65002231","target":"feeder-ss-vskp-01-1","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65002231","edge_type":"observes","attrs":{}},{"source":"meter-65021169","target":"feeder-ss-vskp-01-2","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65021169","edge_type":"observes","attrs":{}},{"source":"iex-dam","target":"ss-vskp-02","edge_type":"prices","attrs":{}},{"source":"weather-vskp","target":"ss-vskp-02","edge_type":"observes","attrs":{}},{"source":"bess-vskp-02a","target":"ss-vskp-02","edge_type":"dispatches","attrs":{}},{"source":"solar-ss-vskp-02","target":"ss-vskp-02","edge_type":"feeds","attrs":{}},{"source":"ss-vskp-02","target":"ci-ss-vskp-02-1","edge_type":"serves","attrs":{}},{"source":"ss-vskp-02","target":"ci-ss-vskp-02-2","edge_type":"serves","attrs":{}},{"source":"feeder-ss-vskp-02-1","target":"ss-vskp-02","edge_type":"feeds","attrs":{}},{"source":"feeder-ss-vskp-02-2","target":"ss-vskp-02","edge_type":"feeds","attrs":{}},{"source":"feeder-ss-vskp-02-3","target":"ss-vskp-02","edge_type":"feeds","attrs":{}},{"source":"meter-65041990","target":"feeder-ss-vskp-02-1","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65041990","edge_type":"observes","attrs":{}},{"source":"meter-65011155","target":"feeder-ss-vskp-02-2","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65011155","edge_type":"observes","attrs":{}},{"source":"meter-53408407","target":"feeder-ss-vskp-02-3","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-53408407","edge_type":"observes","attrs":{}},{"source":"meter-65022501","target":"feeder-ss-vskp-02-1","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65022501","edge_type":"observes","attrs":{}},{"source":"meter-65025443","target":"feeder-ss-vskp-02-2","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65025443","edge_type":"observes","attrs":{}},{"source":"meter-65015739","target":"feeder-ss-vskp-02-3","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65015739","edge_type":"observes","attrs":{}},{"source":"meter-65015026","target":"feeder-ss-vskp-02-1","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65015026","edge_type":"observes","attrs":{}},{"source":"meter-65044028","target":"feeder-ss-vskp-02-2","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65044028","edge_type":"observes","attrs":{}},{"source":"meter-65003175","target":"feeder-ss-vskp-02-3","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65003175","edge_type":"observes","attrs":{}},{"source":"meter-65022302","target":"feeder-ss-vskp-02-1","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65022302","edge_type":"observes","attrs":{}},{"source":"meter-53401842","target":"feeder-ss-vskp-02-2","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-53401842","edge_type":"observes","attrs":{}},{"source":"meter-65001891","target":"feeder-ss-vskp-02-3","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65001891","edge_type":"observes","attrs":{}},{"source":"meter-65023781","target":"feeder-ss-vskp-02-1","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65023781","edge_type":"observes","attrs":{}},{"source":"meter-65049719","target":"feeder-ss-vskp-02-2","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65049719","edge_type":"observes","attrs":{}},{"source":"iex-dam","target":"ss-vskp-03","edge_type":"prices","attrs":{}},{"source":"weather-vskp","target":"ss-vskp-03","edge_type":"observes","attrs":{}},{"source":"bess-vskp-03a","target":"ss-vskp-03","edge_type":"dispatches","attrs":{}},{"source":"solar-ss-vskp-03","target":"ss-vskp-03","edge_type":"feeds","attrs":{}},{"source":"ss-vskp-03","target":"ci-ss-vskp-03-1","edge_type":"serves","attrs":{}},{"source":"ss-vskp-03","target":"ci-ss-vskp-03-2","edge_type":"serves","attrs":{}},{"source":"feeder-ss-vskp-03-1","target":"ss-vskp-03","edge_type":"feeds","attrs":{}},{"source":"feeder-ss-vskp-03-2","target":"ss-vskp-03","edge_type":"feeds","attrs":{}},{"source":"feeder-ss-vskp-03-3","target":"ss-vskp-03","edge_type":"feeds","attrs":{}},{"source":"meter-53407938","target":"feeder-ss-vskp-03-1","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-53407938","edge_type":"observes","attrs":{}},{"source":"meter-65004669","target":"feeder-ss-vskp-03-2","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65004669","edge_type":"observes","attrs":{}},{"source":"meter-65023784","target":"feeder-ss-vskp-03-3","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65023784","edge_type":"observes","attrs":{}},{"source":"meter-53401885","target":"feeder-ss-vskp-03-1","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-53401885","edge_type":"observes","attrs":{}},{"source":"meter-65030697","target":"feeder-ss-vskp-03-2","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65030697","edge_type":"observes","attrs":{}},{"source":"meter-65024185","target":"feeder-ss-vskp-03-3","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65024185","edge_type":"observes","attrs":{}},{"source":"meter-50154700","target":"feeder-ss-vskp-03-1","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-50154700","edge_type":"observes","attrs":{}},{"source":"meter-65007036","target":"feeder-ss-vskp-03-2","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65007036","edge_type":"observes","attrs":{}},{"source":"meter-50186364","target":"feeder-ss-vskp-03-3","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-50186364","edge_type":"observes","attrs":{}},{"source":"meter-65017058","target":"feeder-ss-vskp-03-1","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65017058","edge_type":"observes","attrs":{}},{"source":"meter-51057607","target":"feeder-ss-vskp-03-2","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-51057607","edge_type":"observes","attrs":{}},{"source":"meter-53403416","target":"feeder-ss-vskp-03-3","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-53403416","edge_type":"observes","attrs":{}},{"source":"meter-65024487","target":"feeder-ss-vskp-03-1","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-65024487","edge_type":"observes","attrs":{}},{"source":"meter-50143025","target":"feeder-ss-vskp-03-2","edge_type":"consumes","attrs":{}},{"source":"weather-vskp","target":"meter-50143025","edge_type":"observes","attrs":{}}],"meta":{"n_nodes":69,"n_edges":112,"kinds":["bess","ci_load","feeder","iex","meter","solar","substation","weather"]}}</script>
+<script>
+(function(){
+  const RAW = JSON.parse(document.getElementById('network-data').textContent);
+  const byId = new Map(RAW.nodes.map(n => [n.id, n]));
+
+  // --- coloring & sizing ---
+  const KIND_COLOR = {
+    substation: getCss('--teal'),
+    feeder:     getCss('--slate'),
+    meter:      getCss('--slate'), // overridden by health
+    bess:       getCss('--purple'),
+    solar:      getCss('--yellow'),
+    ci_load:    getCss('--pink'),
+    weather:    getCss('--cyan'),
+    iex:        getCss('--orange'),
+  };
+  const KIND_RADIUS = {
+    substation: 16, feeder: 8, meter: 6,
+    bess: 11, solar: 10, ci_load: 9, weather: 12, iex: 12,
+  };
+  function meterHealth(m){
+    const v = m.holdout_mape;
+    if(v == null) return 'unknown';
+    if(v < 8) return 'green';
+    if(v <= 12) return 'amber';
+    return 'red';
+  }
+  function nodeColor(n){
+    if(n.kind === 'meter'){
+      const h = meterHealth(n);
+      if(h === 'green') return getCss('--green');
+      if(h === 'amber') return getCss('--amber');
+      if(h === 'red')   return getCss('--red');
+      return getCss('--ink-faint');
+    }
+    return KIND_COLOR[n.kind] || getCss('--ink-dim');
+  }
+  function getCss(name){
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  // --- meta bar ---
+  const meters = RAW.nodes.filter(n => n.kind === 'meter');
+  const mapes  = meters.map(m => m.holdout_mape).filter(v => v != null);
+  const meanMape = mapes.reduce((a,b)=>a+b,0) / (mapes.length || 1);
+  document.getElementById('m-nodes').textContent = RAW.nodes.length;
+  document.getElementById('m-edges').textContent = RAW.edges.length;
+  document.getElementById('m-meters').textContent = meters.length;
+  document.getElementById('m-health').textContent = meanMape.toFixed(2) + '%';
+
+  // --- svg + zoom ---
+  const svg = d3.select('#svg');
+  const stage = document.getElementById('stage');
+  const W = () => stage.clientWidth, H = () => stage.clientHeight;
+
+  const root = svg.append('g');
+  const linkG = root.append('g').attr('class','links');
+  const nodeG = root.append('g').attr('class','nodes');
+
+  svg.call(d3.zoom()
+    .scaleExtent([0.3, 4])
+    .on('zoom', (ev) => root.attr('transform', ev.transform)));
+
+  // --- links ---
+  const linkData = RAW.edges.map(e => ({...e}));
+  const nodeData = RAW.nodes.map(n => ({...n}));
+
+  const link = linkG.selectAll('line')
+    .data(linkData).enter().append('line')
+      .attr('class','link')
+      .attr('stroke', d => edgeColor(d.edge_type))
+      .attr('stroke-width', d => d.edge_type === 'dispatches' ? 1.8 : 1)
+      .attr('stroke-dasharray', d => ['observes','prices'].includes(d.edge_type) ? '3 4' : null);
+
+  function edgeColor(t){
+    switch(t){
+      case 'consumes':   return 'rgba(148,163,184,.55)';
+      case 'feeds':      return 'rgba(20,184,166,.55)';
+      case 'serves':     return 'rgba(244,114,182,.55)';
+      case 'dispatches': return 'rgba(167,139,250,.75)';
+      case 'observes':   return 'rgba(34,211,238,.35)';
+      case 'prices':     return 'rgba(251,146,60,.50)';
+      default:           return 'rgba(161,161,170,.35)';
+    }
+  }
+
+  // --- nodes ---
+  const node = nodeG.selectAll('g.node')
+    .data(nodeData).enter().append('g')
+      .attr('class','node')
+      .style('cursor','pointer')
+      .call(d3.drag()
+        .on('start', (ev,d) => { if(!ev.active) sim.alphaTarget(.3).restart(); d.fx=d.x; d.fy=d.y; })
+        .on('drag',  (ev,d) => { d.fx=ev.x; d.fy=ev.y; })
+        .on('end',   (ev,d) => { if(!ev.active) sim.alphaTarget(0); d.fx=null; d.fy=null; }));
+
+  node.append('circle')
+    .attr('r', d => KIND_RADIUS[d.kind] || 6)
+    .attr('fill', d => nodeColor(d))
+    .attr('stroke', d => d.kind === 'substation' ? '#042f2e' : 'rgba(9,9,11,.9)')
+    .attr('stroke-width', d => d.kind === 'substation' ? 2 : 1.4);
+
+  node.filter(d => d.kind === 'substation').append('text')
+    .text(d => d.label)
+    .attr('y', -22)
+    .attr('text-anchor','middle')
+    .attr('fill','var(--ink)')
+    .style('font-size','11.5px')
+    .style('font-weight','500')
+    .style('pointer-events','none');
+
+  // --- tooltip & click ---
+  const tip = d3.select('#tip');
+  node.on('mousemove', (ev,d) => {
+      const r = stage.getBoundingClientRect();
+      tip.style('left', (ev.clientX - r.left + 12) + 'px')
+         .style('top',  (ev.clientY - r.top + 12) + 'px')
+         .style('opacity', 1)
+         .html(tooltipHTML(d));
+    })
+    .on('mouseleave', () => tip.style('opacity', 0))
+    .on('click', (ev,d) => { ev.stopPropagation(); selectNode(d); });
+
+  d3.select('#svg').on('click', () => selectNode(null));
+  document.getElementById('close-x').onclick = () => selectNode(null);
+
+  function tooltipHTML(d){
+    const lines = [];
+    lines.push(`<div class="ttl">${escapeHtml(d.label)}</div>`);
+    lines.push(`<div class="sub">${d.kind}${d.id ? ' · ' + d.id : ''}</div>`);
+    if(d.kind === 'meter'){
+      lines.push(`MAPE ${d.holdout_mape != null ? d.holdout_mape.toFixed(2)+'%' : '—'}`);
+      lines.push(`tier ${d.tier}`);
+    }
+    if(d.kind === 'substation'){
+      lines.push(`landed ₹${d.landed_cost_inr_per_kwh}/kWh`);
+      lines.push(`contracted ${d.total_contracted_kva} kVA`);
+    }
+    if(d.kind === 'bess'){
+      lines.push(`${d.capacity_mwh} MWh · ${d.duration_h}h · ${d.round_trip_efficiency*100}% RTE`);
+    }
+    if(d.kind === 'solar'){
+      lines.push(`${d.capacity_kwp} kWp`);
+    }
+    return lines.join('<br>');
+  }
+
+  // --- drilldown ---
+  function selectNode(d){
+    const panel = document.getElementById('panel');
+    const body = document.getElementById('panel-body');
+    if(!d){ panel.classList.add('hidden'); resetHighlight(); return; }
+
+    panel.classList.remove('hidden');
+    body.innerHTML = detailHTML(d);
+
+    // highlight neighborhood
+    const nb = new Set([d.id]);
+    linkData.forEach(e => {
+      const s = e.source.id || e.source, t = e.target.id || e.target;
+      if(s === d.id) nb.add(t);
+      if(t === d.id) nb.add(s);
+    });
+    d3.selectAll('g.node').classed('faded', n => !nb.has(n.id));
+    d3.selectAll('line.link').classed('faded', e => {
+      const s = e.source.id || e.source, t = e.target.id || e.target;
+      return !(s === d.id || t === d.id);
+    });
+  }
+  function resetHighlight(){
+    d3.selectAll('g.node').classed('faded', false);
+    d3.selectAll('line.link').classed('faded', false);
+  }
+
+  function detailHTML(d){
+    if(d.kind === 'substation'){
+      const children = linkData
+        .filter(e => (e.target.id || e.target) === d.id || (e.source.id || e.source) === d.id)
+        .map(e => byId.get((e.source.id||e.source) === d.id ? (e.target.id||e.target) : (e.source.id||e.source)))
+        .filter(Boolean);
+      const feeders = children.filter(c => c.kind === 'feeder');
+      const bess    = RAW.nodes.filter(n => n.kind === 'bess'  && n.substation_id === d.id);
+      const solar   = RAW.nodes.filter(n => n.kind === 'solar' && n.substation_id === d.id);
+      const ci      = RAW.nodes.filter(n => n.kind === 'ci_load' && n.substation_id === d.id);
+      const meters  = RAW.nodes.filter(n => n.kind === 'meter' && n.substation_id === d.id);
+      const healthCounts = {green:0, amber:0, red:0};
+      meters.forEach(m => { const h = meterHealth(m); if(healthCounts[h]!=null) healthCounts[h]++; });
+      const bessCap = bess.reduce((s,b) => s + b.capacity_mwh, 0);
+      const solCap  = solar.reduce((s,x) => s + (x.capacity_kwp||0), 0);
+      const mapeVals = meters.map(m=>m.holdout_mape).filter(v=>v!=null);
+      const meanM = mapeVals.reduce((a,b)=>a+b,0)/(mapeVals.length||1);
+      return `
+        <div class="eyebrow">Substation</div>
+        <h2>${escapeHtml(d.label)}</h2>
+        <span class="pill">${escapeHtml(d.substation_code)}</span>
+        <dl class="kv" style="margin-top:12px">
+          <dt>Zone</dt><dd>${escapeHtml(d.zone || '—')}</dd>
+          <dt>Landed cost</dt><dd>₹${d.landed_cost_inr_per_kwh}/kWh</dd>
+          <dt>Tariff regime</dt><dd>${escapeHtml(d.tariff_regime || '—')}</dd>
+          <dt>Contracted</dt><dd>${d.total_contracted_kva} kVA</dd>
+          <dt>Location</dt><dd>${d.lat.toFixed(4)}, ${d.lon.toFixed(4)}</dd>
+        </dl>
+        <div class="section">
+          <div class="section-title">Assets on-site</div>
+          <dl class="kv">
+            <dt>BESS</dt><dd>${bess.length} unit${bess.length===1?'':'s'} · ${bessCap.toFixed(1)} MWh</dd>
+            <dt>Solar</dt><dd>${solar.length ? solar.length+' plant · '+solCap+' kWp' : '—'}</dd>
+            <dt>C&amp;I loads</dt><dd>${ci.length}</dd>
+            <dt>Feeders</dt><dd>${feeders.length}</dd>
+          </dl>
+        </div>
+        <div class="section">
+          <div class="section-title">Forecast health · ${meters.length} meters</div>
+          <dl class="kv">
+            <dt>Mean holdout MAPE</dt><dd>${meanM.toFixed(2)}%</dd>
+            <dt>Green &lt;8%</dt><dd>${healthCounts.green}</dd>
+            <dt>Amber 8–12%</dt><dd>${healthCounts.amber}</dd>
+            <dt>Red &gt;12%</dt><dd>${healthCounts.red}</dd>
+          </dl>
+          <div class="health-strip" title="green / amber / red share">
+            ${healthStripSegments(healthCounts, meters.length)}
+          </div>
+        </div>
+      `;
+    }
+    if(d.kind === 'meter'){
+      const h = meterHealth(d);
+      const hb = d.historical_block_mape || {};
+      return `
+        <div class="eyebrow">Meter</div>
+        <h2>MSN ${escapeHtml(d.msn)}</h2>
+        <span class="pill ${h}">${h.toUpperCase()} · ${d.holdout_mape != null ? d.holdout_mape.toFixed(2)+'%' : '—'}</span>
+        <dl class="kv" style="margin-top:12px">
+          <dt>Tier</dt><dd>${escapeHtml(d.tier)}</dd>
+          <dt>Phase</dt><dd>${escapeHtml(d.phase || '—')}</dd>
+          <dt>Feeder</dt><dd>${escapeHtml(d.feeder_id)}</dd>
+          <dt>Substation</dt><dd>${escapeHtml(d.substation_id)}</dd>
+          <dt>Features kept</dt><dd>${d.n_features_selected}</dd>
+        </dl>
+        <div class="section">
+          <div class="section-title">Block MAPE</div>
+          <dl class="kv">
+            <dt>Night</dt><dd>${fmtPct(hb.night)}</dd>
+            <dt>Morning</dt><dd>${fmtPct(hb.morning)}</dd>
+            <dt>Solar</dt><dd>${fmtPct(hb.solar)}</dd>
+            <dt>Peak</dt><dd>${fmtPct(hb.peak)}</dd>
+          </dl>
+        </div>
+      `;
+    }
+    if(d.kind === 'bess'){
+      return `
+        <div class="eyebrow">BESS unit</div>
+        <h2>${escapeHtml(d.label)}</h2>
+        <dl class="kv" style="margin-top:10px">
+          <dt>Capacity</dt><dd>${d.capacity_mwh} MWh</dd>
+          <dt>Duration</dt><dd>${d.duration_h} h</dd>
+          <dt>C-rate</dt><dd>${d.c_rate}</dd>
+          <dt>RTE</dt><dd>${(d.round_trip_efficiency*100).toFixed(0)}%</dd>
+          <dt>SOC</dt><dd>${d.soc_pct.toFixed(0)}%</dd>
+          <dt>Cycles</dt><dd>${d.cycle_count}</dd>
+          <dt>Degradation</dt><dd>${d.degradation_pct.toFixed(1)}%</dd>
+          <dt>CapEx</dt><dd>₹${(d.capex_inr_per_kwh/1000).toFixed(0)}k/kWh</dd>
+          <dt>Substation</dt><dd>${escapeHtml(d.substation_id)}</dd>
+        </dl>
+      `;
+    }
+    if(d.kind === 'solar'){
+      return `
+        <div class="eyebrow">Solar plant</div>
+        <h2>${escapeHtml(d.label)}</h2>
+        <dl class="kv" style="margin-top:10px">
+          <dt>Capacity</dt><dd>${d.capacity_kwp} kWp</dd>
+          <dt>Tilt</dt><dd>${d.tilt_deg ?? '—'}°</dd>
+          <dt>Azimuth</dt><dd>${d.azimuth_deg ?? '—'}°</dd>
+          <dt>Substation</dt><dd>${escapeHtml(d.substation_id)}</dd>
+        </dl>
+      `;
+    }
+    if(d.kind === 'feeder'){
+      const meters = RAW.nodes.filter(n => n.kind==='meter' && n.feeder_id === d.id);
+      return `
+        <div class="eyebrow">Feeder</div>
+        <h2>${escapeHtml(d.label)}</h2>
+        <dl class="kv" style="margin-top:10px">
+          <dt>Voltage</dt><dd>${d.voltage_kv ?? '—'} kV</dd>
+          <dt>Length</dt><dd>${d.length_km ?? '—'} km</dd>
+          <dt>Phase</dt><dd>${escapeHtml(d.phase || '—')}</dd>
+          <dt>Meters</dt><dd>${meters.length}</dd>
+          <dt>Substation</dt><dd>${escapeHtml(d.substation_id)}</dd>
+        </dl>
+      `;
+    }
+    // generic
+    return `
+      <div class="eyebrow">${escapeHtml(d.kind)}</div>
+      <h2>${escapeHtml(d.label)}</h2>
+      <pre style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-dim);white-space:pre-wrap">${escapeHtml(JSON.stringify(d, null, 2))}</pre>
+    `;
+  }
+
+  function fmtPct(v){ return v == null ? '—' : v.toFixed(2)+'%'; }
+
+  function healthStripSegments(c, total){
+    if(!total) return '';
+    const segs = [];
+    const push = (cls, n) => { for(let i=0;i<n;i++) segs.push(`<div class="seg" style="background:var(--${cls})"></div>`); };
+    push('green', c.green); push('amber', c.amber); push('red', c.red);
+    return segs.join('');
+  }
+
+  function escapeHtml(s){
+    return String(s ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  }
+
+  // --- simulation ---
+  const sim = d3.forceSimulation(nodeData)
+    .force('link', d3.forceLink(linkData).id(d => d.id)
+      .distance(d => {
+        if(d.edge_type === 'consumes') return 30;
+        if(d.edge_type === 'feeds')    return 55;
+        if(d.edge_type === 'serves')   return 70;
+        if(d.edge_type === 'dispatches') return 65;
+        if(d.edge_type === 'observes') return 180;
+        if(d.edge_type === 'prices')   return 220;
+        return 90;
+      })
+      .strength(d => ['observes','prices'].includes(d.edge_type) ? 0.05 : 0.6))
+    .force('charge', d3.forceManyBody()
+      .strength(d => d.kind === 'substation' ? -900 : d.kind === 'feeder' ? -220 : -90))
+    .force('center', d3.forceCenter(W()/2, H()/2))
+    .force('collide', d3.forceCollide().radius(d => (KIND_RADIUS[d.kind]||6) + 4))
+    .on('tick', () => {
+      link
+        .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+      node.attr('transform', d => `translate(${d.x},${d.y})`);
+    });
+
+  window.addEventListener('resize', () => {
+    sim.force('center', d3.forceCenter(W()/2, H()/2)).alpha(0.3).restart();
+  });
+})();
+</script>
+</body>
+</html>

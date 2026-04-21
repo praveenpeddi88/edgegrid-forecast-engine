@@ -1,0 +1,14 @@
+{
+  "origin": "2026-01-29T00:00:00",
+  "n_meters_total": 42,
+  "n_train_records": 37,
+  "n_forecast_records": 37,
+  "wall_clock_s": {
+    "retrain_total_summed": 193.0,
+    "retrain_per_meter_mean": 5.22,
+    "forecast_total_summed": 1145.7,
+    "forecast_per_meter_mean": 30.96
+  },
+  "extrapolation_10_origins_serial_s": 13386.7,
+  "extrapolation_10_origins_serial_hours": 3.72
+}

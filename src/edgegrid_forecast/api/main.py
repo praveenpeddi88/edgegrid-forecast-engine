@@ -54,8 +54,10 @@ app.add_middleware(
 # Additive — preserves legacy consumer-centric endpoints below.
 from .routers import router as prototype_router  # noqa: E402
 from .showcase import router as showcase_router  # noqa: E402
+from .v5_router import router as v5_router  # noqa: E402
 app.include_router(prototype_router)
 app.include_router(showcase_router)
+app.include_router(v5_router)
 
 # ─── Request/Response Models ─────────────────────────────────────────────────
 

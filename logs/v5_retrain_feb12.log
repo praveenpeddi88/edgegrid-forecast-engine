@@ -1,0 +1,17 @@
+[v5-retrain] loading fleet data...
+  fleet data ready in 0.4s
+[v5-retrain] retraining 50 meters (cutoff=2026-02-12 15:00:00)
+Training until validation scores don't improve for 20 rounds
+Did not meet early stopping. Best iteration is:
+[149]	valid_0's l1: 0.0466504
+Training until validation scores don't improve for 40 rounds
+Early stopping, best iteration is:
+[753]	valid_0's l1: 0.0725153
+  [ 1/50] 50143025 OK mape= 10.25%  n_feat=39    2.5s
+Training until validation scores don't improve for 20 rounds
+Did not meet early stopping. Best iteration is:
+[150]	valid_0's l1: 19.0273
+Training until validation scores don't improve for 40 rounds
+Did not meet early stopping. Best iteration is:
+[797]	valid_0's l1: 15.8142
+  [ 2/50] 50154700 OK mape=  3.41%  n_feat=39    2.8s

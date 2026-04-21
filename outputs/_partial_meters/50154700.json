@@ -1,0 +1,1 @@
+{"msn": "50154700", "status": "ok", "method": "seasonal_anchor_weather_adjusted", "last_real_ts": "2026-02-12 15:00:00", "wallclock_s": 0.02, "total_predicted_kwh": 792.49, "mean_kwh_per_30min": 0.5503, "hist_p95_kwh": 1.8, "suspect_threshold_kwh": 18.0, "n_nan": 0, "n_negative": 0, "n_suspect_gt_10xp95": 0}

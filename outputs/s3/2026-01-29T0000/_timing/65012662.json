@@ -1,0 +1,10 @@
+{
+  "msn": "65012662",
+  "origin": "2026-01-29T00:00:00",
+  "load_s": 0.53,
+  "train_s": 5.4,
+  "forecast_s": 32.14,
+  "total_s": 38.09,
+  "bundle_holdout_mape": 4.25,
+  "n_horizon": 336
+}

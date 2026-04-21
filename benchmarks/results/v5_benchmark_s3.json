@@ -1,0 +1,223 @@
+{
+  "benchmark": "S3 rolling-origin (leaky, Feb-12 v5 bundles)",
+  "note": "All origins fall inside the v5 training window. This measures cross-origin stability + horizon decay. For a clean S3, bundles must be retrained with cutoff \u2264 each origin.",
+  "origins": [
+    "2025-12-04T00:00:00",
+    "2025-12-11T00:00:00",
+    "2025-12-18T00:00:00",
+    "2025-12-25T00:00:00",
+    "2026-01-01T00:00:00",
+    "2026-01-08T00:00:00",
+    "2026-01-15T00:00:00",
+    "2026-01-22T00:00:00",
+    "2026-01-29T00:00:00",
+    "2026-02-05T00:00:00"
+  ],
+  "fleet_summary": {
+    "n_origins": 10,
+    "n_meters": 6,
+    "n_meter_origins": 60,
+    "mape_mean": 243.36,
+    "mape_median": 18.52,
+    "mape_p90": 60.85,
+    "under_4pct_rate": 0.0,
+    "under_10pct_rate": 0.067,
+    "stability_sigma_mean": 481.368,
+    "stability_sigma_median": 9.296
+  },
+  "horizon_decay": {
+    "mape_0_24h_mean": 23.02,
+    "mape_24_72h_mean": 318.5,
+    "mape_72h_7d_mean": 269.03
+  },
+  "cohort_distribution_meter_origin": {
+    "E: >=25%": 21,
+    "D: 15-25%": 19,
+    "C: 10-15%": 16,
+    "B: 5-10%": 4
+  },
+  "per_origin": [
+    {
+      "origin": "2025-12-04T00:00:00",
+      "n_meters": 6,
+      "mape_mean": 1291.398,
+      "mape_median": 17.161,
+      "mape_p90": 3843.395,
+      "under_4pct": 0,
+      "under_10pct": 0
+    },
+    {
+      "origin": "2025-12-11T00:00:00",
+      "n_meters": 6,
+      "mape_mean": 27.133,
+      "mape_median": 18.484,
+      "mape_p90": 48.384,
+      "under_4pct": 0,
+      "under_10pct": 0
+    },
+    {
+      "origin": "2025-12-18T00:00:00",
+      "n_meters": 6,
+      "mape_mean": 28.348,
+      "mape_median": 21.148,
+      "mape_p90": 47.516,
+      "under_4pct": 0,
+      "under_10pct": 0
+    },
+    {
+      "origin": "2025-12-25T00:00:00",
+      "n_meters": 6,
+      "mape_mean": 24.725,
+      "mape_median": 19.85,
+      "mape_p90": 43.639,
+      "under_4pct": 0,
+      "under_10pct": 1
+    },
+    {
+      "origin": "2026-01-01T00:00:00",
+      "n_meters": 6,
+      "mape_mean": 84.101,
+      "mape_median": 15.074,
+      "mape_p90": 228.62,
+      "under_4pct": 0,
+      "under_10pct": 1
+    },
+    {
+      "origin": "2026-01-08T00:00:00",
+      "n_meters": 6,
+      "mape_mean": 751.699,
+      "mape_median": 13.22,
+      "mape_p90": 2231.622,
+      "under_4pct": 0,
+      "under_10pct": 1
+    },
+    {
+      "origin": "2026-01-15T00:00:00",
+      "n_meters": 6,
+      "mape_mean": 24.948,
+      "mape_median": 18.094,
+      "mape_p90": 43.368,
+      "under_4pct": 0,
+      "under_10pct": 0
+    },
+    {
+      "origin": "2026-01-22T00:00:00",
+      "n_meters": 6,
+      "mape_mean": 20.441,
+      "mape_median": 15.58,
+      "mape_p90": 33.888,
+      "under_4pct": 0,
+      "under_10pct": 1
+    },
+    {
+      "origin": "2026-01-29T00:00:00",
+      "n_meters": 6,
+      "mape_mean": 150.626,
+      "mape_median": 21.142,
+      "mape_p90": 415.721,
+      "under_4pct": 0,
+      "under_10pct": 0
+    },
+    {
+      "origin": "2026-02-05T00:00:00",
+      "n_meters": 6,
+      "mape_mean": 30.188,
+      "mape_median": 28.644,
+      "mape_p90": 47.478,
+      "under_4pct": 0,
+      "under_10pct": 0
+    }
+  ],
+  "per_meter": [
+    {
+      "msn": "65049719",
+      "tier": "Medium (0.5-1.5k)",
+      "n_origins": 10,
+      "mape_mean": 52.257,
+      "mape_std": 13.518,
+      "mape_min": 23.586,
+      "mape_max": 67.563,
+      "mape_median": 55.231,
+      "mape_0_24h": 49.378,
+      "mape_24_72h": 45.142,
+      "mape_72h_7d": 56.571,
+      "coverage_mean": 24.923,
+      "cohort_avg": "E: >=25%"
+    },
+    {
+      "msn": "67001151",
+      "tier": "HT (>5kWh)",
+      "n_origins": 10,
+      "mape_mean": 17.202,
+      "mape_std": 5.073,
+      "mape_min": 11.93,
+      "mape_max": 27.037,
+      "mape_median": 15.362,
+      "mape_0_24h": 17.151,
+      "mape_24_72h": 17.539,
+      "mape_72h_7d": 17.044,
+      "coverage_mean": 53.816,
+      "cohort_avg": "D: 15-25%"
+    },
+    {
+      "msn": "67001818",
+      "tier": "HT (>5kWh)",
+      "n_origins": 10,
+      "mape_mean": 16.29,
+      "mape_std": 3.407,
+      "mape_min": 11.64,
+      "mape_max": 21.054,
+      "mape_median": 16.846,
+      "mape_0_24h": 15.74,
+      "mape_24_72h": 16.841,
+      "mape_72h_7d": 16.153,
+      "coverage_mean": 17.985,
+      "cohort_avg": "D: 15-25%"
+    },
+    {
+      "msn": "67003234",
+      "tier": "HT (>5kWh)",
+      "n_origins": 10,
+      "mape_mean": 1266.825,
+      "mape_std": 2619.133,
+      "mape_min": 24.235,
+      "mape_max": 7626.295,
+      "mape_median": 37.156,
+      "mape_0_24h": 29.81,
+      "mape_24_72h": 1794.391,
+      "mape_72h_7d": 1360.206,
+      "coverage_mean": 21.619,
+      "cohort_avg": "E: >=25%"
+    },
+    {
+      "msn": "67003309",
+      "tier": "HT (>5kWh)",
+      "n_origins": 10,
+      "mape_mean": 92.867,
+      "mape_std": 245.185,
+      "mape_min": 6.622,
+      "mape_max": 789.98,
+      "mape_median": 13.154,
+      "mape_0_24h": 11.774,
+      "mape_24_72h": 23.107,
+      "mape_72h_7d": 148.982,
+      "coverage_mean": 29.897,
+      "cohort_avg": "E: >=25%"
+    },
+    {
+      "msn": "67003694",
+      "tier": "HT (>5kWh)",
+      "n_origins": 10,
+      "mape_mean": 14.723,
+      "mape_std": 1.894,
+      "mape_min": 10.595,
+      "mape_max": 17.906,
+      "mape_median": 15.142,
+      "mape_0_24h": 14.285,
+      "mape_24_72h": 14.008,
+      "mape_72h_7d": 15.197,
+      "coverage_mean": 19.387,
+      "cohort_avg": "C: 10-15%"
+    }
+  ]
+}
